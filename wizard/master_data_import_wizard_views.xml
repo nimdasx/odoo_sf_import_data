@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="master_data_import_wizard_form" model="ir.ui.view">
+        <field name="name">sf.import.data.wizard.form</field>
+        <field name="model">sf.import.data.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Import Data Master">
+                <p>
+                    Upload file Excel master data (chart of accounts, jurnal, asset,
+                    kas/bank, opening balance vendor/customer) sesuai format sheet
+                    yang dipakai modul ini. Lihat README modul <code>odoo_sf_import_data</code>
+                    untuk detail format sheet.
+                </p>
+                <div class="alert alert-warning" role="alert">
+                    <strong>Perhatian:</strong> proses ini langsung membuat/mengubah data akuntansi
+                    (akun, jurnal, asset, kas/bank, opening balance vendor/customer) sesuai isi file.
+                    Record yang sudah <strong>posted</strong> tidak akan diubah (dilewati), tapi yang
+                    masih draft akan ditimpa ulang. Pastikan file sudah benar dan sebaiknya dites dulu
+                    di database non-production sebelum dipakai di database produksi.
+                </div>
+                <group>
+                    <field name="file" filename="filename" required="1"/>
+                    <field name="filename" invisible="1"/>
+                </group>
+                <footer>
+                    <button name="action_import" type="object" string="Import" class="btn-primary"/>
+                    <button string="Batal" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="master_data_import_wizard_action" model="ir.actions.act_window">
+        <field name="name">Import Data Master</field>
+        <field name="res_model">sf.import.data.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <menuitem id="master_data_import_wizard_menu"
+        name="Import Data Master"
+        parent="base.menu_administration"
+        action="master_data_import_wizard_action"
+        groups="base.group_system"
+        sequence="4"/>
+</odoo>
