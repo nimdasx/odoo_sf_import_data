@@ -6,6 +6,8 @@ Depends: `accountant` (Enterprise Accounting, untuk `account.asset`). External P
 
 Modul ini juga bawa data bawaan sendiri (`data/ir.model.fields.selection.csv`) yang relabel selection field `account_type` bawaan Odoo ke Bahasa Indonesia (mis. "Bank dan Tunai", "Piutang", dll) — otomatis ter-apply begitu modul ini di-install, tidak perlu setup tambahan.
 
+Contoh file Excel siap pakai (untuk referensi format sheet, atau langsung dites lewat wizard/Opsi 2 di bawah): [`contoh-master-data.xlsx`](contoh-master-data.xlsx).
+
 ## Cara Pakai
 
 ### Opsi 1 — Bundled di modul client (otomatis saat install)
