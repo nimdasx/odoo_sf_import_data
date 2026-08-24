@@ -61,23 +61,31 @@ def import_bundled_data(env, module_dir):
 
 
 def _read_opening_fiscal_year_start(wb):
-    """Read OPENING_FISCAL_YEAR_START from the "petunjuk" sheet. Odoo dates
-    the opening move the day before it, so callers derive OPENING_BALANCE_DATE
-    from this instead of also reading a separate value - keeps the two in
-    sync even if the sheet's own OPENING_BALANCE_DATE row is edited wrong.
+    """Read OPENING_FISCAL_YEAR_START, now a key/value row in the "company"
+    sheet (falls back to the older "petunjuk" location for workbooks that
+    haven't been migrated yet). Odoo dates the opening move the day before
+    it, so callers derive OPENING_BALANCE_DATE from this instead of also
+    reading a separate value - keeps the two in sync even if the sheet's
+    own OPENING_BALANCE_DATE row is edited wrong.
     """
-    for row in wb["petunjuk"].iter_rows(values_only=True):
-        if row and row[0] == "OPENING_FISCAL_YEAR_START":
-            return row[1].date()
-    raise ValueError('"OPENING_FISCAL_YEAR_START" tidak ditemukan di sheet petunjuk')
+    for sheet in ("company", "petunjuk"):
+        if sheet not in wb.sheetnames:
+            continue
+        for row in wb[sheet].iter_rows(values_only=True):
+            if row and row[0] == "OPENING_FISCAL_YEAR_START":
+                return row[1].date()
+    raise ValueError('"OPENING_FISCAL_YEAR_START" tidak ditemukan di sheet "company" atau "petunjuk"')
 
 
 def _sheet_rows(wb, sheet, columns):
     rows = wb[sheet].iter_rows(values_only=True)
     header = next(rows)
-    idx = {col: header.index(col) for col in columns}
+    # A column entirely absent from the header (not just blank cells) reads
+    # as None for every row - same tolerance _move_rows already gives an
+    # optional column, so a sheet can omit one it doesn't need at all.
+    idx = {col: header.index(col) for col in columns if col in header}
     for row in rows:
-        values = {col: (row[idx[col]] if idx[col] < len(row) else None) for col in columns}
+        values = {col: (row[idx[col]] if col in idx and idx[col] < len(row) else None) for col in columns}
         if values["id"]:
             values["id"] = values["id"] if "." in values["id"] else f"{MODULE}.{values['id']}"
             yield values
@@ -234,11 +242,12 @@ def _import_opening_move(env, wb, sheet, partner_rank_field, default_date):
 
 
 def _import_company(env, wb):
-    """Read the "company" sheet (key/value rows, same shape as the
-    OPENING_FISCAL_YEAR_START block in "petunjuk") and write it onto the
-    single company record. Optional sheet, and a blank cell leaves that
-    field untouched rather than clearing it - so a partially-filled sheet
-    (e.g. no logo URL yet) never blanks out data set another way.
+    """Read the "company" sheet - key/value rows (also where
+    OPENING_FISCAL_YEAR_START/OPENING_BALANCE_DATE live, see
+    _read_opening_fiscal_year_start) - and write it onto the single company
+    record. Optional sheet, and a blank cell leaves that field untouched
+    rather than clearing it - so a partially-filled sheet (e.g. no logo URL
+    yet) never blanks out data set another way.
     """
     if "company" not in wb.sheetnames:
         return
@@ -252,8 +261,15 @@ def _import_company(env, wb):
     company = env.ref("base.main_company")
     values = {}
     for field in ("name", "street", "street2", "city", "zip", "phone", "email", "website", "report_footer"):
-        if data.get(field) not in (None, ""):
-            values[field] = data[field]
+        value = data.get(field)
+        if value in (None, ""):
+            continue
+        # A numeric-looking text field (e.g. zip) can come back as a float
+        # if the sheet cell got auto-formatted as a number - avoid writing
+        # "55151.0" instead of "55151".
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        values[field] = str(value)
 
     if data.get("country"):
         country = env["res.country"].search([("name", "=", data["country"])], limit=1)
