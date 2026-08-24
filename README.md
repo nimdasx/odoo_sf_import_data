@@ -2,7 +2,7 @@
 
 Modul shared untuk import Chart of Accounts, jurnal, asset, kas/bank, dan opening balance vendor/customer dari satu file Excel — dipakai lintas client, bukan spesifik satu database.
 
-Depends: `accountant` (Enterprise Accounting, untuk `account.asset`). External Python dependency: `openpyxl`.
+Depends: `accountant` (Enterprise Accounting, untuk `account.asset`). External Python dependency: `openpyxl`, `requests` (untuk download logo, lihat sheet `company` di bawah).
 
 Modul ini juga bawa data bawaan sendiri (`data/ir.model.fields.selection.csv`) yang relabel selection field `account_type` bawaan Odoo ke Bahasa Indonesia (mis. "Bank dan Tunai", "Piutang", dll) — otomatis ter-apply begitu modul ini di-install, tidak perlu setup tambahan.
 
@@ -53,9 +53,22 @@ EOF
 
 > Catatan: `post_init_hook` (kalau dipakai lewat Opsi 1) hanya jalan sekali saat **install pertama** module client, tidak ikut jalan lagi saat `-u` update — pakai cara re-run manual di atas kalau perlu jalankan ulang.
 
+## Data Perusahaan (sheet `company`)
+
+Sheet opsional berisi baris key/value (sama seperti blok `OPENING_FISCAL_YEAR_START` di sheet `petunjuk`), ditulis langsung ke `res.company` (`base.main_company`) — tidak butuh `id`/xml_id karena company sudah pasti ada, cukup `write()`.
+
+| key | Keterangan |
+|---|---|
+| `name`, `street`, `street2`, `city`, `zip`, `phone`, `email`, `website`, `report_footer` | Teks biasa, ditulis apa adanya. |
+| `state`, `country` | Nama (bukan kode), di-resolve lewat pencarian nama — sama seperti kolom `state`/`country_id` di sheet `res.partner`. |
+| `logo` | **URL** gambar (bukan file upload) — otomatis di-`download` (timeout 10 detik) dan di-encode base64 ke `company.logo`. Gagal download (mis. URL mati/timeout) cuma di-log warning, tidak menggagalkan import lain, dan logo lama **tidak dihapus**. |
+| `external_report_layout` | xml_id layout laporan (mis. `web.external_layout_folder`). Kosong = pakai default `web.external_layout_folder` (`DEFAULT_EXTERNAL_REPORT_LAYOUT` di `hooks.py`). |
+
+Baris/kolom yang dikosongkan **tidak** menimpa data yang sudah ada (kecuali sheet-nya sendiri tidak ada sama sekali, dalam hal ini `_import_company` di-skip) — jadi sheet boleh diisi bertahap.
+
 ## Urutan Import
 
-`res.partner` → `account.account` → `account.journal` → `account.asset` → `kas_bank` → `vendor_bill` → `customer_invoice` (urutan ini sudah tetap di dalam `run_import`, tidak configurable).
+`company` → `res.partner` → `account.account` → `account.journal` → `account.asset` → `kas_bank` → `vendor_bill` → `customer_invoice` (urutan ini sudah tetap di dalam `run_import`, tidak configurable).
 
 Dependency nyata ada 2, keduanya sudah terjaga oleh urutan di atas:
 - `account.asset` resolve `journal_id`-nya dengan cari nama jurnal "Aset Tetap" yang **baru dibuat** oleh import `account.journal` (bukan bawaan CoA template) — jadi jurnal wajib di-import sebelum asset.

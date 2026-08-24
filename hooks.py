@@ -1,8 +1,10 @@
+import base64
 import glob
 import logging
 import os
 from datetime import timedelta
 
+import requests
 from openpyxl import load_workbook
 
 from odoo.fields import Command
@@ -17,6 +19,10 @@ MODULE = os.path.basename(os.path.dirname(__file__))
 JOURNAL_TYPES = {"Bank": "bank", "Kas": "cash", "Lain-lain": "general"}
 ASSET_METHODS = {"Garis Lurus": "linear"}
 ASSET_PERIODS = {"Bulan": "1", "Tahun": "12"}
+
+# Used when the "company" sheet's external_report_layout row is blank -
+# every client so far uses the same layout, but the sheet can still override it.
+DEFAULT_EXTERNAL_REPORT_LAYOUT = "web.external_layout_folder"
 
 # Set to True to auto-validate imported assets (generates the depreciation
 # board and posts its moves). False leaves them as draft for manual review.
@@ -227,6 +233,53 @@ def _import_opening_move(env, wb, sheet, partner_rank_field, default_date):
             move.action_post()
 
 
+def _import_company(env, wb):
+    """Read the "company" sheet (key/value rows, same shape as the
+    OPENING_FISCAL_YEAR_START block in "petunjuk") and write it onto the
+    single company record. Optional sheet, and a blank cell leaves that
+    field untouched rather than clearing it - so a partially-filled sheet
+    (e.g. no logo URL yet) never blanks out data set another way.
+    """
+    if "company" not in wb.sheetnames:
+        return
+    data = {}
+    for row in wb["company"].iter_rows(values_only=True):
+        if row and row[0]:
+            data[row[0]] = row[1]
+    if not data:
+        return
+
+    company = env.ref("base.main_company")
+    values = {}
+    for field in ("name", "street", "street2", "city", "zip", "phone", "email", "website", "report_footer"):
+        if data.get(field) not in (None, ""):
+            values[field] = data[field]
+
+    if data.get("country"):
+        country = env["res.country"].search([("name", "=", data["country"])], limit=1)
+        values["country_id"] = country.id
+        if data.get("state"):
+            state = env["res.country.state"].search(
+                [("name", "=", data["state"]), ("country_id", "=", country.id)], limit=1
+            )
+            values["state_id"] = state.id
+
+    layout = env.ref(data.get("external_report_layout") or DEFAULT_EXTERNAL_REPORT_LAYOUT, raise_if_not_found=False)
+    if layout:
+        values["external_report_layout_id"] = layout.id
+
+    logo_url = data.get("logo")
+    if logo_url:
+        try:
+            response = requests.get(logo_url, timeout=10)
+            response.raise_for_status()
+            values["logo"] = base64.b64encode(response.content)
+        except Exception:
+            _logger.warning("Failed to download company logo from %s - keeping existing logo.", logo_url, exc_info=True)
+
+    company.write(values)
+
+
 def _import_res_partner(env, wb):
     columns = ("id", "name", "email", "phone", "is_company", "street", "city", "state", "country_id", "ref")
     for row in _sheet_rows(wb, "res.partner", columns):
@@ -412,6 +465,7 @@ def run_import(env, wb):
     if company.account_opening_move_id and company.account_opening_move_id.state == "draft":
         company.account_opening_move_id.date = balance_date
 
+    _import_company(env, wb)
     _import_res_partner(env, wb)
     _import_account_account(env, wb)
     _import_account_journal(env, wb)

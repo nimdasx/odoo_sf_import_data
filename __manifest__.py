@@ -13,5 +13,5 @@
     ],
     "installable": True,
     "application": True,
-    "external_dependencies": {"python": ["openpyxl"]},
+    "external_dependencies": {"python": ["openpyxl", "requests"]},
 }
