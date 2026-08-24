@@ -3,7 +3,7 @@ import glob
 import logging
 import os
 import time
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 
 import requests
 from openpyxl import load_workbook
@@ -93,6 +93,34 @@ def import_bundled_data(env, module_dir):
     run_import(env, wb)
 
 
+_DATE_STRING_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y")
+
+
+def _parse_sheet_date(value, context):
+    """A date cell normally comes back from openpyxl as a real datetime,
+    but if someone typed the date as plain text in Google Sheets instead
+    of a proper Date-formatted cell, it comes back as a str instead -
+    try a few common formats before giving up, so that crashes with a
+    clear message instead of an opaque "'str' object has no attribute
+    'date'" AttributeError.
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        for fmt in _DATE_STRING_FORMATS:
+            try:
+                return datetime.strptime(text, fmt).date()
+            except ValueError:
+                continue
+    raise ValueError(
+        f"{context}: nilai tanggal {value!r} tidak dikenali - pastikan cell-nya "
+        "berformat Date (bukan Text) di sheet-nya."
+    )
+
+
 def _read_opening_balance_date(wb):
     """Read OPENING_BALANCE_DATE, a key/value row in the "company" sheet
     (falls back to the older "petunjuk" location for workbooks that haven't
@@ -106,7 +134,7 @@ def _read_opening_balance_date(wb):
             continue
         for row in wb[sheet].iter_rows(values_only=True):
             if row and row[0] == "OPENING_BALANCE_DATE":
-                return row[1].date()
+                return _parse_sheet_date(row[1], "OPENING_BALANCE_DATE")
     raise ValueError('"OPENING_BALANCE_DATE" tidak ditemukan di sheet "company" atau "petunjuk"')
 
 
@@ -210,7 +238,7 @@ def _move_rows(wb, sheet, default_date):
             move = {
                 "id": xml_id,
                 "ref": get(row, "Reference"),
-                "date": raw_date.date() if raw_date else default_date,
+                "date": _parse_sheet_date(raw_date, "date") if raw_date else default_date,
                 "journal": get(row, "journal"),
                 "lines": [],
             }
@@ -250,7 +278,7 @@ def _import_opening_move(env, wb, sheet, partner_rank_field, default_date):
                 "partner_id": _partner_by_name(env, line["partner"], partner_rank_field).id,
             }
             if line["date_maturity"]:
-                vals["date_maturity"] = line["date_maturity"].date()
+                vals["date_maturity"] = _parse_sheet_date(line["date_maturity"], "date_maturity")
             line_commands.append(Command.create(vals))
 
         if not company.currency_id.is_zero(balance):
@@ -482,7 +510,7 @@ def _import_account_asset(env, wb, balance_date):
         asset_account = _account_by_code_name(env, row["account_asset_id"])
         depreciation_account = _account_by_code_name(env, row["account_depreciation_id"])
         method_period = ASSET_PERIODS[row["method_period"]]
-        acquisition_date = row["acquisition_date"].date()
+        acquisition_date = _parse_sheet_date(row["acquisition_date"], "acquisition_date")
 
         already_depreciated = row["already_depreciated_amount_import"]
         if not already_depreciated:
