@@ -36,7 +36,7 @@ def post_init_hook(env):
 
 ### Opsi 2 — Upload manual lewat UI
 
-Menu **Settings → Import Data Master** (butuh akses Administrator/`base.group_system`). Upload file `.xlsx` sesuai format sheet, klik Import. Wizard otomatis tertutup setelah selesai dengan notifikasi sukses.
+Menu **Settings → Import Data Master** (butuh akses Administrator/`base.group_system`). Upload file `.xlsx` sesuai format sheet, **atau** paste link Google Sheet-nya langsung di field terpisah (harus di-share sebagai "Anyone with the link"/public — kalau tidak, download-nya gagal dengan error yang jelas, bukan diam-diam import file kosong/salah). Kalau dua-duanya diisi, file yang dipakai. Klik Import — wizard otomatis tertutup setelah selesai dengan notifikasi sukses.
 
 ### Re-run manual tanpa uninstall/install ulang
 
@@ -55,7 +55,7 @@ EOF
 
 ## Data Perusahaan (sheet `company`)
 
-Sheet opsional berisi baris key/value, ditulis langsung ke `res.company` (`base.main_company`) — tidak butuh `id`/xml_id karena company sudah pasti ada, cukup `write()`. Sheet ini juga tempat baris `OPENING_FISCAL_YEAR_START`/`OPENING_BALANCE_DATE` (lihat bagian [Tanggal Opening Balance](#tanggal-opening-balance-sheet-company)).
+Sheet opsional berisi baris key/value, ditulis langsung ke `res.company` (`base.main_company`) — tidak butuh `id`/xml_id karena company sudah pasti ada, cukup `write()`. Sheet ini juga tempat baris `OPENING_BALANCE_DATE` (lihat bagian [Tanggal Opening Balance](#tanggal-opening-balance-sheet-company)).
 
 | key | Keterangan |
 |---|---|
@@ -63,8 +63,10 @@ Sheet opsional berisi baris key/value, ditulis langsung ke `res.company` (`base.
 | `state`, `country` | Nama (bukan kode), di-resolve lewat pencarian nama — sama seperti kolom `state`/`country_id` di sheet `res.partner`. |
 | `logo` | **URL** gambar (bukan file upload) — otomatis di-`download` (timeout 10 detik) dan di-encode base64 ke `company.logo`. Gagal download (mis. URL mati/timeout) cuma di-log warning, tidak menggagalkan import lain, dan logo lama **tidak dihapus**. |
 | `external_report_layout` | xml_id layout laporan (mis. `web.external_layout_folder`). Kosong = pakai default `web.external_layout_folder` (`DEFAULT_EXTERNAL_REPORT_LAYOUT` di `hooks.py`). |
+| `analytic_accounting` | `TRUE`/`FALSE` (boleh juga `ya`/`tidak`, `yes`/`no`, `1`/`0`, `aktif`/`nonaktif`, atau checkbox Excel asli) — aktifkan/nonaktifkan fitur **Analytic Accounting**. |
+| `budget_management` | Sama format dengan di atas — aktifkan/nonaktifkan **Budget Management** (install modul `account_budget` kalau `TRUE`). |
 
-Baris/kolom yang dikosongkan **tidak** menimpa data yang sudah ada (kecuali sheet-nya sendiri tidak ada sama sekali, dalam hal ini `_import_company` di-skip) — jadi sheet boleh diisi bertahap.
+Baris/kolom yang dikosongkan **tidak** menimpa data yang sudah ada (kecuali sheet-nya sendiri tidak ada sama sekali, dalam hal ini `_import_company` di-skip) — jadi sheet boleh diisi bertahap. Untuk `analytic_accounting`/`budget_management` khususnya: kosong = **tidak diubah** (beda dengan field lain, nilai "off" untuk toggle ini tetap nilai yang valid untuk di-set eksplisit, jadi butuh dibedakan dari "belum diisi").
 
 ## Urutan Import
 
@@ -78,9 +80,11 @@ Sheet lain independen satu sama lain (resolve akun/partner via kode/nama yang su
 
 ## Tanggal Opening Balance (sheet `company`)
 
-Tanggal fiskal awal tahun buku diambil dari sheet `company`, baris `OPENING_FISCAL_YEAR_START` — isi tanggal awal tahun buku di situ. Tanggal opening move sendiri otomatis di-derive sebagai `OPENING_FISCAL_YEAR_START - 1 hari`, mengikuti aturan Odoo bahwa opening move di-tanggal-kan sehari sebelum awal tahun buku (baris `OPENING_BALANCE_DATE` di sheet cuma informasi, tidak dibaca kode). Kalau baris `OPENING_FISCAL_YEAR_START` tidak ketemu, import akan gagal dengan error yang jelas (bukan diam-diam pakai tanggal default).
+Tanggal cutover opening balance diambil dari sheet `company`, baris `OPENING_BALANCE_DATE` — isi tanggal saldo awal berlaku di situ (mis. "saldo per 30 Juni 2026"). Awal tahun buku (`account_opening_date`) otomatis di-derive sebagai `OPENING_BALANCE_DATE + 1 hari`, mengikuti aturan Odoo bahwa opening move di-tanggal-kan sehari sebelum awal tahun buku. Kalau baris `OPENING_BALANCE_DATE` tidak ketemu, import akan gagal dengan error yang jelas (bukan diam-diam pakai tanggal default).
 
-> Sebelumnya baris ini ada di sheet `petunjuk` — workbook lama yang belum di-migrasi tetap jalan, `_read_opening_fiscal_year_start` cek sheet `company` dulu baru fallback ke `petunjuk`.
+Kalau hasil derive-nya bukan tanggal 1 (mis. `OPENING_BALANCE_DATE` diisi tanggal 15), import **tidak** gagal — cuma log warning, karena Odoo sendiri tidak mewajibkan tahun buku mulai di tanggal 1 (ada kasus valid seperti migrasi sistem di tengah bulan). Warning ini cuma jaring pengaman untuk typo tanggal, bukan validasi keras.
+
+> Sebelumnya nilai ini dibaca dari baris `OPENING_FISCAL_YEAR_START` (arah sebaliknya) di sheet `petunjuk` — `_read_opening_balance_date` cek sheet `company` dulu baru fallback ke `petunjuk` untuk workbook lama yang belum di-migrasi.
 
 ## Opening Balance untuk Asset
 

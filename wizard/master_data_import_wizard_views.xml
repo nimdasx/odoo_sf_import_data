@@ -8,8 +8,8 @@
                 <p>
                     Upload file Excel master data (chart of accounts, jurnal, asset,
                     kas/bank, opening balance vendor/customer) sesuai format sheet
-                    yang dipakai modul ini. Lihat README modul <code>odoo_sf_import_data</code>
-                    untuk detail format sheet.
+                    yang dipakai modul ini, atau paste link Google Sheet-nya langsung.
+                    Lihat README modul <code>odoo_sf_import_data</code> untuk detail format sheet.
                 </p>
                 <div class="alert alert-warning" role="alert">
                     <strong>Perhatian:</strong> proses ini langsung membuat/mengubah data akuntansi
@@ -19,9 +19,14 @@
                     di database non-production sebelum dipakai di database produksi.
                 </div>
                 <group>
-                    <field name="file" filename="filename" required="1"/>
+                    <field name="file" filename="filename"/>
                     <field name="filename" invisible="1"/>
+                    <field name="google_sheet_url" placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"/>
                 </group>
+                <div class="alert alert-info" role="alert">
+                    Kalau pakai link Google Sheet: sheet-nya harus di-share sebagai
+                    <strong>"Anyone with the link"</strong> (public) supaya bisa di-download.
+                </div>
                 <footer>
                     <button name="action_import" type="object" string="Import" class="btn-primary"/>
                     <button string="Batal" class="btn-secondary" special="cancel"/>

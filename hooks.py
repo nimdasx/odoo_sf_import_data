@@ -2,10 +2,12 @@ import base64
 import glob
 import logging
 import os
+import time
 from datetime import timedelta
 
 import requests
 from openpyxl import load_workbook
+from psycopg2.errors import SerializationFailure
 
 from odoo.fields import Command
 
@@ -23,6 +25,37 @@ ASSET_PERIODS = {"Bulan": "1", "Tahun": "12"}
 # Used when the "company" sheet's external_report_layout row is blank -
 # every client so far uses the same layout, but the sheet can still override it.
 DEFAULT_EXTERNAL_REPORT_LAYOUT = "web.external_layout_folder"
+
+# "company" sheet key -> res.config.settings field toggled through it. Both
+# are applied via res.config.settings.execute(), not company.write(), since
+# that's what actually applies the group implication / triggers the module
+# install - same as checking the box in Settings and clicking Save.
+ACCOUNTING_FEATURE_FIELDS = {
+    "analytic_accounting": "group_analytic_accounting",
+    "budget_management": "module_account_budget",  # installs account_budget
+}
+
+_TRUE_VALUES = {"true", "ya", "yes", "1", "aktif"}
+_FALSE_VALUES = {"false", "tidak", "no", "0", "nonaktif", "non-aktif"}
+
+
+def _parse_bool(value):
+    """Parse a yes/no "company" sheet cell. None/blank means "not specified,
+    don't touch" - unlike the other company fields, a boolean's off state is
+    a real value someone might want to set, so this needs three outcomes
+    (True/False/None) instead of just skip-if-blank.
+    """
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return None
+    text = str(value).strip().lower()
+    if text in _TRUE_VALUES:
+        return True
+    if text in _FALSE_VALUES:
+        return False
+    _logger.warning('Unrecognized yes/no value %r in the "company" sheet - ignoring.', value)
+    return None
 
 # Set to True to auto-validate imported assets (generates the depreciation
 # board and posts its moves). False leaves them as draft for manual review.
@@ -60,21 +93,21 @@ def import_bundled_data(env, module_dir):
     run_import(env, wb)
 
 
-def _read_opening_fiscal_year_start(wb):
-    """Read OPENING_FISCAL_YEAR_START, now a key/value row in the "company"
-    sheet (falls back to the older "petunjuk" location for workbooks that
-    haven't been migrated yet). Odoo dates the opening move the day before
-    it, so callers derive OPENING_BALANCE_DATE from this instead of also
-    reading a separate value - keeps the two in sync even if the sheet's
-    own OPENING_BALANCE_DATE row is edited wrong.
+def _read_opening_balance_date(wb):
+    """Read OPENING_BALANCE_DATE, a key/value row in the "company" sheet
+    (falls back to the older "petunjuk" location for workbooks that haven't
+    been migrated yet). Ini tanggal cutover opening balance yang sebenarnya
+    (mis. "saldo per 30 Juni 2026") - fiscal_year_start di run_import()
+    di-derive dari sini (+1 hari), bukan sebaliknya, karena inilah nilai
+    yang paling natural diisi orang: tanggal per kapan saldo awal berlaku.
     """
     for sheet in ("company", "petunjuk"):
         if sheet not in wb.sheetnames:
             continue
         for row in wb[sheet].iter_rows(values_only=True):
-            if row and row[0] == "OPENING_FISCAL_YEAR_START":
+            if row and row[0] == "OPENING_BALANCE_DATE":
                 return row[1].date()
-    raise ValueError('"OPENING_FISCAL_YEAR_START" tidak ditemukan di sheet "company" atau "petunjuk"')
+    raise ValueError('"OPENING_BALANCE_DATE" tidak ditemukan di sheet "company" atau "petunjuk"')
 
 
 def _sheet_rows(wb, sheet, columns):
@@ -243,11 +276,12 @@ def _import_opening_move(env, wb, sheet, partner_rank_field, default_date):
 
 def _import_company(env, wb):
     """Read the "company" sheet - key/value rows (also where
-    OPENING_FISCAL_YEAR_START/OPENING_BALANCE_DATE live, see
-    _read_opening_fiscal_year_start) - and write it onto the single company
-    record. Optional sheet, and a blank cell leaves that field untouched
-    rather than clearing it - so a partially-filled sheet (e.g. no logo URL
-    yet) never blanks out data set another way.
+    OPENING_BALANCE_DATE lives, see _read_opening_balance_date) - and write
+    it onto the single company record, then apply any accounting feature
+    toggles found there (see
+    ACCOUNTING_FEATURE_FIELDS). Optional sheet, and a blank cell leaves that
+    field/toggle untouched rather than clearing it - so a partially-filled
+    sheet (e.g. no logo URL yet) never blanks out data set another way.
     """
     if "company" not in wb.sheetnames:
         return
@@ -294,6 +328,35 @@ def _import_company(env, wb):
             _logger.warning("Failed to download company logo from %s - keeping existing logo.", logo_url, exc_info=True)
 
     company.write(values)
+
+    settings_values = {}
+    for key, field in ACCOUNTING_FEATURE_FIELDS.items():
+        parsed = _parse_bool(data.get(key))
+        if parsed is not None:
+            settings_values[field] = parsed
+    if settings_values:
+        _apply_config_settings(env, company, values, settings_values)
+
+
+def _apply_config_settings(env, company, company_values, settings_values):
+    """A module_* setting (e.g. budget_management -> module_account_budget)
+    goes through Odoo's live "hot install" path, which takes an exclusive
+    lock on ir_cron as a safety check - this can lose a race against a
+    concurrently running server's own cron-polling thread and abort with a
+    SerializationFailure. That's a textbook case for "just retry the
+    transaction" - rolling back also discards the company.write() above
+    (same uncommitted transaction), so redo it before each retry.
+    """
+    for attempt in range(3):
+        try:
+            env["res.config.settings"].create(settings_values).execute()
+            return
+        except SerializationFailure:
+            if attempt == 2:
+                raise
+            env.cr.rollback()
+            company.write(company_values)
+            time.sleep(1)
 
 
 def _import_res_partner(env, wb):
@@ -471,10 +534,17 @@ def run_import(env, wb):
     post_init_hook) and the Settings > Import Data Master wizard (a
     user-uploaded file).
     """
-    fiscal_year_start = _read_opening_fiscal_year_start(wb)
-    # account_opening_date is the fiscal year *start*; Odoo dates the
-    # opening move the day before it.
-    balance_date = fiscal_year_start - timedelta(days=1)
+    balance_date = _read_opening_balance_date(wb)
+    # account_opening_date perlu tanggal *awal* tahun buku, bukan tanggal
+    # cutover-nya - Odoo men-tanggal-kan opening move sehari sebelum awal
+    # tahun buku, jadi arahnya kebalik dari balance_date.
+    fiscal_year_start = balance_date + timedelta(days=1)
+    if fiscal_year_start.day != 1:
+        _logger.warning(
+            'OPENING_BALANCE_DATE (%s) menghasilkan awal tahun buku %s, bukan tanggal 1 - '
+            "cek lagi kalau ini bukan disengaja (mis. salah pilih tanggal).",
+            balance_date, fiscal_year_start,
+        )
 
     company = env.ref("base.main_company")
     company.write({"account_opening_date": fiscal_year_start})
