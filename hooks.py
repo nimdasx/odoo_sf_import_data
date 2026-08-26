@@ -21,6 +21,14 @@ MODULE = os.path.basename(os.path.dirname(__file__))
 JOURNAL_TYPES = {"Bank": "bank", "Kas": "cash", "Lain-lain": "general"}
 ASSET_METHODS = {"Garis Lurus": "linear"}
 ASSET_PERIODS = {"Bulan": "1", "Tahun": "12"}
+ANALYTIC_PLAN_APPLICABILITIES = {
+    "optional": "optional",
+    "opsional": "optional",
+    "mandatory": "mandatory",
+    "wajib": "mandatory",
+    "unavailable": "unavailable",
+    "tidak tersedia": "unavailable",
+}
 
 # Used when the "company" sheet's external_report_layout row is blank -
 # every client so far uses the same layout, but the sheet can still override it.
@@ -139,16 +147,23 @@ def _read_opening_balance_date(wb):
 
 
 def _sheet_rows(wb, sheet, columns):
+    if sheet not in wb.sheetnames:
+        return
     rows = wb[sheet].iter_rows(values_only=True)
-    header = next(rows)
+    try:
+        header = next(rows)
+    except StopIteration:
+        return
+    if not header:
+        return
     # A column entirely absent from the header (not just blank cells) reads
     # as None for every row - same tolerance _move_rows already gives an
     # optional column, so a sheet can omit one it doesn't need at all.
     idx = {col: header.index(col) for col in columns if col in header}
     for row in rows:
         values = {col: (row[idx[col]] if col in idx and idx[col] < len(row) else None) for col in columns}
-        if values["id"]:
-            values["id"] = values["id"] if "." in values["id"] else f"{MODULE}.{values['id']}"
+        if values.get("id"):
+            values["id"] = values["id"] if "." in str(values["id"]) else f"{MODULE}.{values['id']}"
             yield values
 
 
@@ -410,6 +425,72 @@ def _import_res_partner(env, wb):
         _get_or_create(env, "res.partner", row["id"], values)
 
 
+def _import_account_analytic_plan(env, wb):
+    columns = ("id", "name", "sequence", "default_applicability", "color", "description", "parent_id")
+    for row in _sheet_rows(wb, "account.analytic.plan", columns):
+        values = {
+            "name": row["name"],
+        }
+        if row["sequence"] is not None:
+            values["sequence"] = int(row["sequence"])
+        if row["color"] is not None:
+            values["color"] = int(row["color"])
+        if row["default_applicability"]:
+            raw_app = str(row["default_applicability"]).strip().lower()
+            if raw_app in ANALYTIC_PLAN_APPLICABILITIES:
+                values["default_applicability"] = ANALYTIC_PLAN_APPLICABILITIES[raw_app]
+        if row["description"]:
+            values["description"] = str(row["description"])
+        if row["parent_id"]:
+            parent = env.ref(row["parent_id"], raise_if_not_found=False)
+            if not parent and "." not in str(row["parent_id"]):
+                parent = env.ref(f"{MODULE}.{row['parent_id']}", raise_if_not_found=False)
+            if not parent:
+                parent = env["account.analytic.plan"].search([("name", "=", row["parent_id"])], limit=1)
+            if parent:
+                values["parent_id"] = parent.id
+        _get_or_create(env, "account.analytic.plan", row["id"], values)
+
+
+def _import_account_analytic_account(env, wb):
+    columns = ("id", "name", "plan_id", "code", "active", "partner_id")
+    for row in _sheet_rows(wb, "account.analytic.account", columns):
+        plan = None
+        if row["plan_id"]:
+            plan_str = str(row["plan_id"]).strip()
+            plan = env.ref(plan_str, raise_if_not_found=False)
+            if not plan and "." not in plan_str:
+                plan = env.ref(f"{MODULE}.{plan_str}", raise_if_not_found=False)
+            if not plan:
+                plan = env["account.analytic.plan"].search([("name", "=", plan_str)], limit=1)
+            if not plan:
+                plan = env["account.analytic.plan"].search([("complete_name", "=", plan_str)], limit=1)
+
+        if not plan:
+            _logger.warning(
+                "Rencana Analitik (plan_id) %r tidak ditemukan untuk akun analitik %r (id=%s) - dilewati.",
+                row["plan_id"], row["name"], row["id"]
+            )
+            continue
+
+        values = {
+            "name": row["name"],
+            "plan_id": plan.id,
+        }
+        if row["code"]:
+            code_val = str(int(row["code"])) if isinstance(row["code"], float) and row["code"].is_integer() else str(row["code"])
+            values["code"] = code_val
+        if row["active"] is not None:
+            parsed_active = _parse_bool(row["active"])
+            if parsed_active is not None:
+                values["active"] = parsed_active
+        if row["partner_id"]:
+            partner = env["res.partner"].search([("name", "=", row["partner_id"])], limit=1)
+            if partner:
+                values["partner_id"] = partner.id
+        _get_or_create(env, "account.analytic.account", row["id"], values)
+
+
 def _import_kas_bank(env, wb, default_date):
     """Import kas/bank opening balances as account.bank.statement.line records
     so they show up as Bank Transactions (a plain account.move posted through
@@ -588,3 +669,5 @@ def run_import(env, wb):
     _import_opening_move(env, wb, "vendor_bill", "supplier_rank", balance_date)
     _import_opening_move(env, wb, "customer_invoice", "customer_rank", balance_date)
     _reconcile_liquidity_transfer(env)
+    _import_account_analytic_plan(env, wb)
+    _import_account_analytic_account(env, wb)

@@ -50,7 +50,7 @@ EOF
 ## Urutan & Aturan Sheet
 
 Urutan import:
-`company` → `res.partner` → `account.account` → `account.journal` → `account.asset` → `kas_bank` → `vendor_bill` → `customer_invoice`
+`company` → `res.partner` → `account.account` → `account.journal` → `account.asset` → `kas_bank` → `vendor_bill` → `customer_invoice` → `account.analytic.plan` → `account.analytic.account`
 
 ### 1. Sheet `company` (Key-Value)
 - **`OPENING_BALANCE_DATE`** *(Wajib)*: Tanggal cutover saldo awal (mis. `2026-06-30`). Tahun buku Odoo (`account_opening_date`) otomatis menjadi `H+1` (`2026-07-01`).
@@ -70,6 +70,14 @@ Urutan import:
 > - Akun Aset Tetap & Akumulasi Penyusutan (diisi dari sheet `account.asset`).
 > - Akun Liquidity Transfer (diisi dari sheet `kas_bank`).
 > - Akun Retained Earnings / Laba Ditahan (dihitung otomatis sebagai penyeimbang saldo).
+
+### 5. Sheet `account.analytic.plan` (Rencana Analitik)
+- **Kolom**: `id`, `name`, `sequence`, `default_applicability`, `color`, `description` *(opsional)*, `parent_id` *(opsional)*.
+- **`default_applicability`**: Pilihan `Optional`, `Mandatory`, atau `Unavailable`.
+
+### 6. Sheet `account.analytic.account` (Akun Analitik)
+- **Kolom**: `id`, `name`, `plan_id`, `code` *(opsional)*, `active` *(opsional)*, `partner_id` *(opsional)*.
+- **`plan_id`**: Nama atau XML ID dari Rencana Analitik (harus sesuai dengan yang terdaftar di sheet `account.analytic.plan`).
 
 ---
 
