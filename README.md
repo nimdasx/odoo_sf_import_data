@@ -50,7 +50,7 @@ EOF
 ## Urutan & Aturan Sheet
 
 Urutan import:
-`company` → `res.partner` → `account.account` → `account.journal` → `account.asset` → `kas_bank` → `vendor_bill` → `customer_invoice` → `account.analytic.plan` → `account.analytic.account`
+`company` → `res.partner` → `account.account` → `account.journal` → `account.asset` → `kas_bank` → `vendor_bill` → `customer_invoice` → `account.analytic.plan` → `account.analytic.account` → `account.report` → `account.report.line`
 
 ### 1. Sheet `company` (Key-Value)
 - **`OPENING_BALANCE_DATE`** *(Wajib)*: Tanggal cutover saldo awal (mis. `2026-06-30`). Tahun buku Odoo (`account_opening_date`) otomatis menjadi `H+1` (`2026-07-01`).
@@ -78,6 +78,14 @@ Urutan import:
 ### 6. Sheet `account.analytic.account` (Akun Analitik)
 - **Kolom**: `id`, `name`, `plan_id`, `code` *(opsional)*, `active` *(opsional)*, `partner_id` *(opsional)*.
 - **`plan_id`**: Nama atau XML ID dari Rencana Analitik (harus sesuai dengan yang terdaftar di sheet `account.analytic.plan`).
+
+### 7. Sheet `account.report` (Rename Laporan Keuangan)
+- **Kolom**: `id`, `name`.
+- **Fungsi**: Mengubah nama laporan keuangan (`account.report`), judul window / action (`ir.actions.client`), serta menu sidebar terkait (`ir.ui.menu`) di menu *Accounting → Reporting* (misal: `account_reports.balance_sheet` ➔ `Laporan Posisi Keuangan`, `account_reports.profit_and_loss` ➔ `Laporan Perubahan Dana`).
+
+### 8. Sheet `account.report.line` (Rename Baris/Hirarki Laporan Keuangan)
+- **Kolom**: `id`, `name`, `code` *(opsional)*, `hirarki` *(opsional)*.
+- **Fungsi**: Mengubah label/nama baris dan sub-grup hirarki laporan keuangan (`account.report.line`), misalnya mengubah baris `EQUITY (& EARNINGS)` menjadi `SALDO DANA`. Kolom `hirarki` dan `code` dapat digunakan untuk memudahkan pengurutan dan visualisasi di spreadsheet.
 
 ---
 
