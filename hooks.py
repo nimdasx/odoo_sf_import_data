@@ -1,4 +1,5 @@
 import base64
+import calendar
 import glob
 import logging
 import os
@@ -233,14 +234,28 @@ def _account_by_code_name(env, code_name):
 
 
 def _elapsed_depreciation_periods(acquisition_date, balance_date, method_period):
-    """Whole periods (inclusive of the acquisition period) from
-    acquisition_date through balance_date, for straight-line proration.
+    """Prorata periods from acquisition_date through balance_date, matching
+    Odoo 19 constant_periods prorata calculation convention.
     """
-    if acquisition_date > balance_date:
-        return 0
-    if method_period == "1":  # monthly
-        return (balance_date.year - acquisition_date.year) * 12 + (balance_date.month - acquisition_date.month) + 1
-    return balance_date.year - acquisition_date.year + 1  # yearly
+    if not acquisition_date or not balance_date or acquisition_date > balance_date:
+        return 0.0
+
+    days_in_acq_month = calendar.monthrange(acquisition_date.year, acquisition_date.month)[1]
+    days_in_bal_month = calendar.monthrange(balance_date.year, balance_date.month)[1]
+
+    start_prorata = (days_in_acq_month - acquisition_date.day + 1) / days_in_acq_month
+    end_prorata = balance_date.day / days_in_bal_month
+
+    elapsed_months = (
+        start_prorata
+        + end_prorata
+        + (balance_date.year - acquisition_date.year) * 12
+        + (balance_date.month - acquisition_date.month - 1)
+    )
+
+    if method_period == "12":  # yearly
+        return max(0.0, elapsed_months / 12.0)
+    return max(0.0, elapsed_months)
 
 
 def _write_opening_balances(env, totals):
@@ -707,7 +722,7 @@ def _import_account_asset(env, wb, balance_date):
         acquisition_date = _parse_sheet_date(row["acquisition_date"], "acquisition_date")
 
         already_depreciated = row["already_depreciated_amount_import"]
-        if not already_depreciated:
+        if already_depreciated in (None, ""):
             elapsed = _elapsed_depreciation_periods(acquisition_date, balance_date, method_period)
             elapsed = min(elapsed, row["method_number"])
             already_depreciated = (row["original_value"] or 0.0) / row["method_number"] * elapsed

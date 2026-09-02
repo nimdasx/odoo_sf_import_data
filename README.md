@@ -62,6 +62,44 @@ Urutan import:
 - **Opening Balance Otomatis**: Total `original_value` dan akumulasi depresiasi otomatis mengisi debit/kredit akun terkait pada opening move.
 - **`already_depreciated_amount_import`**: Jika kosong, otomatis dihitung dari `acquisition_date` hingga `OPENING_BALANCE_DATE`. Isi manual hanya untuk override kalkulasi.
 
+#### Rumus & Logika Perhitungan Akumulasi Penyusutan (Prorata Odoo 19)
+Kalkulasi otomatis (*fallback*) menggunakan metode **Garis Lurus (*Straight Line*)** dengan standar Odoo 19 Enterprise berbasis **Prorata Temporis (*Constant Periods*)**:
+
+```text
+Akumulasi Depresiasi = min(original_value, (original_value / method_number) * Periode Berlalu)
+```
+
+Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari:
+1. **Prorata Bulan Pertama (Bulan Perolehan)**:
+   - `Prorata Awal = (Hari Aktif di Bulan Beli) / (Total Hari Kalender Bulan Beli)`
+   - `Prorata Awal = (days_in_month - acquisition_date.day + 1) / days_in_month`
+2. **Bulan Penuh Antara**:
+   - `Bulan Penuh = (balance_date.year - acquisition_date.year) * 12 + (balance_date.month - acquisition_date.month - 1)`
+3. **Prorata Bulan Cut-off**:
+   - `Prorata Akhir = balance_date.day / days_in_month` *(bernilai `1.0` jika tanggal cut-off adalah akhir bulan)*
+4. **Total Periode Berlalu**:
+   - `Periode Berlalu = Prorata Awal + Bulan Penuh + Prorata Akhir`
+
+> **Rumus Formula Spreadsheet / Excel (Kalkulasi Manual)**:
+> ```excel
+> =IF(
+>   acquisition_date > balance_date,
+>   0,
+>   MIN(
+>     original_value,
+>     (original_value / method_number) * (
+>       DATEDIF(EOMONTH(acquisition_date, 0), EOMONTH(balance_date, 0), "M") +
+>       (EOMONTH(acquisition_date, 0) - acquisition_date + 1) / DAY(EOMONTH(acquisition_date, 0))
+>     )
+>   )
+> )
+> ```
+> *Variabel:*
+> - `acquisition_date`: Tanggal Perolehan Aset
+> - `balance_date`: Tanggal Cut-off Saldo Awal / Opening Balance
+> - `original_value`: Harga / Nilai Perolehan Aset
+> - `method_number`: Jumlah Durasi Penyusutan (dalam satuan Bulan)
+
 ### 3. Sheet `kas_bank`
 - Total saldo otomatis mengisi opening balance akun **"Liquidity Transfer"**.
 
