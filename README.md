@@ -105,9 +105,35 @@ Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari:
 
 ### 4. Sheet `account.account` (Perhatian Khusus)
 > **Penting**: Kosongkan nilai `opening_debit`/`opening_credit` untuk akun-akun berikut agar tidak double-balance atau tertimpa:
-> - Akun Aset Tetap & Akumulasi Penyusutan (diisi dari sheet `account.asset`).
-> - Akun Liquidity Transfer (diisi dari sheet `kas_bank`).
-> - Akun Retained Earnings / Laba Ditahan (dihitung otomatis sebagai penyeimbang saldo).
+> - Akun Kas & Bank (diisi dari sheet `kas_bank`).
+> - Akun Aset Tetap & Akumulasi Penyusutan (jika diisi dari sheet `account.asset`).
+> - Akun Liquidity Transfer (diisi otomatis dari sheet `kas_bank`).
+> - Akun Retained Earnings / Laba Ditahan (dihitung otomatis oleh Odoo sebagai penyeimbang saldo).
+
+#### Panduan Posisi Saldo Normal (Debit / Kredit) per `account_type`
+
+| Kategori | Tipe Akun (Bahasa Indonesia) | Technical Type (`account_type`) | Posisi Saldo Normal | Keterangan & Catatan |
+| :--- | :--- | :--- | :---: | :--- |
+| **Aset** | Bank dan Tunai | `asset_cash` | **DEBIT** | Kosongkan di sheet ini, diisi lewat sheet `kas_bank`. |
+| **Aset** | Piutang | `asset_receivable` | **DEBIT** | Disarankan lewat sheet `customer_invoice` agar ada rincian partner. |
+| **Aset** | Aktiva Lancar | `asset_current` | **DEBIT** | Persediaan (*inventory*), uang muka, perlengkapan, dll. |
+| **Aset** | Aktiva Tidak Lancar | `asset_non_current` | **DEBIT** | Investasi jangka panjang, piutang jangka panjang. |
+| **Aset** | Prabayar | `asset_prepayments` | **DEBIT** | Biaya dibayar dimuka (*prepaid expenses*), sewa dibayar dimuka. |
+| **Aset** | Aktiva Tetap | `asset_fixed` | **DEBIT** | Nilai perolehan aset tetap (tanah, bangunan, kendaraan, peralatan). |
+| **Aset** | Akumulasi Penyusutan *(Contra-Asset)* | `asset_fixed` / `asset_non_current` | **KREDIT** | **PENTING**: Masukkan di kolom `opening_credit` (positif), **jangan** angka minus di debit! |
+| **Liabilitas** | Utang | `liability_payable` | **KREDIT** | Disarankan lewat sheet `vendor_bill` agar ada rincian partner. |
+| **Liabilitas** | Kartu Kredit | `liability_credit_card` | **KREDIT** | Kewajiban kartu kredit korporasi. |
+| **Liabilitas** | Pasiva Terkini | `liability_current` | **KREDIT** | Utang lancar, utang gaji, utang pajak, pendapatan diterima dimuka. |
+| **Liabilitas** | Hutang Tidak Lancar | `liability_non_current` | **KREDIT** | Utang bank jangka panjang, obligasi, liabilitas sewa jangka panjang. |
+| **Ekuitas** | Ekuitas | `equity` | **KREDIT** | Modal disetor, saldo dana zakat/infaq/amil, aset bersih yayasan. |
+| **Ekuitas** | Penghasilan Tahun Terkini | `equity_unaffected` | **KREDIT** | Laba Ditahan / Penyeimbang otomatis Odoo (sebaiknya kosongkan). |
+| **Laba Rugi** | Penghasilan | `income` | **KREDIT** | Pendapatan operasional / donasi / penjualan periode berjalan. |
+| **Laba Rugi** | Penghasilan Lainnya | `income_other` | **KREDIT** | Pendapatan bunga bank, keuntungan selisih kurs. |
+| **Laba Rugi** | Pengeluaran | `expense` | **DEBIT** | Beban operasional, gaji, utilitas, biaya kantor. |
+| **Laba Rugi** | Pengeluaran Lainnya | `expense_other` | **DEBIT** | Beban bunga, kerugian selisih kurs, biaya admin bank. |
+| **Laba Rugi** | Penyusutan | `expense_depreciation` | **DEBIT** | Beban penyusutan / depresiasi periode berjalan. |
+| **Laba Rugi** | Biaya Pendapatan | `expense_direct_cost` | **DEBIT** | Harga Pokok Penjualan (HPP) / Beban penyaluran program langsung. |
+| **Lainnya** | Off-Balance Sheet | `off_balance` | — | Akun komitmen / kontinjensi di luar neraca. |
 
 ### 5. Sheet `account.analytic.plan` (Rencana Analitik)
 - **Kolom**: `id`, `name`, `sequence`, `default_applicability`, `color`, `description` *(opsional)*, `parent_id` *(opsional)*.

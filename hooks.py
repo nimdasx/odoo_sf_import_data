@@ -22,6 +22,27 @@ MODULE = os.path.basename(os.path.dirname(__file__))
 JOURNAL_TYPES = {"Bank": "bank", "Kas": "cash", "Lain-lain": "general"}
 ASSET_METHODS = {"Garis Lurus": "linear"}
 ASSET_PERIODS = {"Bulan": "1", "Tahun": "12"}
+ACCOUNT_TYPES = {
+    "piutang": "asset_receivable",
+    "bank dan tunai": "asset_cash",
+    "aktiva lancar": "asset_current",
+    "aktiva tidak lancar": "asset_non_current",
+    "prabayar": "asset_prepayments",
+    "aktiva tetap": "asset_fixed",
+    "utang": "liability_payable",
+    "kartu kredit": "liability_credit_card",
+    "pasiva terkini": "liability_current",
+    "hutang tidak lancar": "liability_non_current",
+    "ekuitas": "equity",
+    "penghasilan tahun terkini": "equity_unaffected",
+    "penghasilan": "income",
+    "penghasilan lainnya": "income_other",
+    "pengeluaran": "expense",
+    "pengeluaran lainnya": "expense_other",
+    "penyusutan": "expense_depreciation",
+    "biaya pendapatan": "expense_direct_cost",
+    "off-balance sheet": "off_balance",
+}
 ANALYTIC_PLAN_APPLICABILITIES = {
     "optional": "optional",
     "opsional": "optional",
@@ -629,7 +650,14 @@ def _import_kas_bank(env, wb, default_date):
     company = env.ref("base.main_company")
     transfer_total = 0.0
     for move_data in _move_rows(wb, "kas_bank", default_date):
-        journal = env["account.journal"].search([("name", "=", move_data["journal"])], limit=1)
+        journal = env["account.journal"].search([
+            ("name", "=", move_data["journal"]),
+            ("company_id", "=", company.id),
+        ], limit=1)
+        if not journal:
+            _logger.warning("Jurnal %r untuk kas_bank tidak ditemukan - dilewati.", move_data["journal"])
+            continue
+
         amount = sum(
             (line["debit"] or 0.0) - (line["credit"] or 0.0)
             for line in move_data["lines"]
@@ -643,14 +671,15 @@ def _import_kas_bank(env, wb, default_date):
 
         existing = env.ref(move_data["id"], raise_if_not_found=False)
         if existing:
-            if existing.state != "draft":
+            if existing.is_reconciled:
+                _logger.warning("Bank statement line %r sudah direkonsiliasi - dilewati.", move_data["id"])
                 continue
             # counterpart_account_id is a create()-only pseudo-field (Odoo
-            # pops it before writing), so an existing draft line can't be
-            # updated via write() - discard and recreate it instead, safe
-            # since a draft statement line has no reconciliation yet.
-            # unlink() also removes the underlying move; _get_or_create's
-            # create path below reuses the now-stale ir.model.data row.
+            # pops it before writing), so an existing statement line can't be
+            # updated via write() - discard and recreate it instead.
+            # In Odoo core, statement lines are auto-posted on create, but
+            # unlinking an unreconciled line safely deletes both the statement
+            # line and its underlying posted move.
             existing.unlink()
 
         values = {
@@ -672,20 +701,62 @@ def _import_kas_bank(env, wb, default_date):
 
 
 def _import_account_account(env, wb):
-    columns = ("id", "code", "name", "opening_debit", "opening_credit")
+    columns = ("id", "code", "name", "account_type", "opening_debit", "opening_credit", "active")
     opening_totals = {}
+    company = env.ref("base.main_company")
     for row in _sheet_rows(wb, "account.account", columns):
-        account = env.ref(row["id"], raise_if_not_found=False)
-        if not account:
+        code = str(row["code"]).strip() if row["code"] is not None else ""
+        name = str(row["name"]).strip() if row["name"] is not None else ""
+        if not code or not name:
             continue
-        account.write({"code": row["code"], "name": row["name"]})
+
+        raw_type = row.get("account_type")
+        account_type = None
+        if raw_type:
+            raw_str = str(raw_type).strip().lower()
+            account_type = ACCOUNT_TYPES.get(raw_str) or (raw_str if raw_str in ACCOUNT_TYPES.values() else None)
+
+        values = {"code": code, "name": name}
+        if account_type:
+            values["account_type"] = account_type
+
+        if row.get("active") is not None:
+            parsed_active = _parse_bool(row["active"])
+            if parsed_active is not None:
+                values["active"] = parsed_active
+
+        account = env.ref(row["id"], raise_if_not_found=False)
+        if not account and code:
+            account = env["account.account"].search([
+                ("code", "=", code),
+                ("company_ids", "in", company.id),
+            ], limit=1)
+            if not account:
+                account = env["account.account"].search([("code", "=", code)], limit=1)
+
+        if account:
+            account.write(values)
+            if "." in row["id"]:
+                module, xml_name = row["id"].split(".", 1)
+            else:
+                module, xml_name = MODULE, row["id"]
+            data = env["ir.model.data"].search([("module", "=", module), ("name", "=", xml_name)])
+            if not data:
+                env["ir.model.data"].create({"module": module, "name": xml_name, "model": "account.account", "res_id": account.id})
+        else:
+            if not values.get("account_type"):
+                values["account_type"] = "asset_current"
+            account = _get_or_create(env, "account.account", row["id"], values)
+
         if row["opening_debit"] or row["opening_credit"]:
             opening_totals[account] = [row["opening_debit"] or 0.0, row["opening_credit"] or 0.0]
+
     _write_opening_balances(env, opening_totals)
 
 
 def _import_account_journal(env, wb):
     columns = ("id", "sequence", "name", "type", "code", "default_account_id", "Bank Feed")
+    company = env.ref("base.main_company")
     for row in _sheet_rows(wb, "account.journal", columns):
         values = {
             "sequence": row["sequence"],
@@ -697,7 +768,30 @@ def _import_account_journal(env, wb):
         account = _account_by_code_name(env, row["default_account_id"])
         if account:
             values["default_account_id"] = account.id
-        _get_or_create(env, "account.journal", row["id"], values)
+
+        journal = env.ref(row["id"], raise_if_not_found=False)
+        if not journal and row.get("code"):
+            journal = env["account.journal"].search([
+                ("code", "=", str(row["code"]).strip()),
+                ("company_id", "=", company.id),
+            ], limit=1)
+        if not journal and row.get("name"):
+            journal = env["account.journal"].search([
+                ("name", "=", str(row["name"]).strip()),
+                ("company_id", "=", company.id),
+            ], limit=1)
+
+        if journal:
+            journal.write(values)
+            if "." in row["id"]:
+                module, xml_name = row["id"].split(".", 1)
+            else:
+                module, xml_name = MODULE, row["id"]
+            data = env["ir.model.data"].search([("module", "=", module), ("name", "=", xml_name)])
+            if not data:
+                env["ir.model.data"].create({"module": module, "name": xml_name, "model": "account.journal", "res_id": journal.id})
+        else:
+            _get_or_create(env, "account.journal", row["id"], values)
 
 
 def _import_account_asset(env, wb, balance_date):
