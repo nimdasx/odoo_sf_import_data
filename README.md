@@ -4,6 +4,7 @@ Modul shared untuk import Chart of Accounts (CoA), partner, jurnal, asset, kas/b
 
 - **Dependencies**: `accountant` (Odoo Enterprise), Python: `openpyxl`, `requests`
 - **Fitur Bawaan**: Relabel `account_type` ke Bahasa Indonesia secara otomatis (`data/ir.model.fields.selection.csv`).
+- **Template Google Sheet**: [Template Import Data Master (Google Sheets)](https://docs.google.com/spreadsheets/d/1Hs-XjWxnb8qFXmuTXrZHzpJnQw4aXy_LuqDtuFQzAGY/edit?usp=sharing)
 
 ---
 
@@ -34,6 +35,10 @@ def post_init_hook(env):
 Buka menu **Settings → Import Data Master** (Hak akses: Administrator):
 - Upload file `.xlsx`, **atau**
 - Masukkan URL Google Sheets publik (*Anyone with the link*).
+
+> **Template Spreadsheet**:
+> Duplikasi template master data berikut (*File → Make a copy*):
+> [https://docs.google.com/spreadsheets/d/1Hs-XjWxnb8qFXmuTXrZHzpJnQw4aXy_LuqDtuFQzAGY/edit?usp=sharing](https://docs.google.com/spreadsheets/d/1Hs-XjWxnb8qFXmuTXrZHzpJnQw4aXy_LuqDtuFQzAGY/edit?usp=sharing)
 
 ### 3. Re-run via Odoo Shell
 ```bash
