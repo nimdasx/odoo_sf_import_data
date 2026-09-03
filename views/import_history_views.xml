@@ -1,0 +1,372 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- =================================================== -->
+    <!-- SF.IMPORT.HISTORY VIEWS                             -->
+    <!-- =================================================== -->
+
+    <!-- LIST VIEW: sf.import.history -->
+    <record id="view_sf_import_history_tree" model="ir.ui.view">
+        <field name="name">sf.import.history.list</field>
+        <field name="model">sf.import.history</field>
+        <field name="arch" type="xml">
+            <list string="Import Data Master" decoration-success="state == 'completed'" decoration-warning="state == 'warning'" decoration-danger="state == 'failed'" decoration-info="state == 'processing'">
+                <field name="name"/>
+                <field name="date"/>
+                <field name="user_id"/>
+                <field name="source_type"/>
+                <field name="total_rows"/>
+                <field name="total_success"/>
+                <field name="total_warning"/>
+                <field name="total_skipped"/>
+                <field name="total_error"/>
+                <field name="state" widget="badge" decoration-success="state == 'completed'" decoration-warning="state == 'warning'" decoration-danger="state == 'failed'" decoration-info="state == 'processing'"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- FORM VIEW: sf.import.history -->
+    <record id="view_sf_import_history_form" model="ir.ui.view">
+        <field name="name">sf.import.history.form</field>
+        <field name="model">sf.import.history</field>
+        <field name="arch" type="xml">
+            <form string="Import Data Master">
+                <header>
+                    <button name="action_run_import" type="object" string="Jalankan / Ulangi Import" class="btn-primary" invisible="state == 'processing'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,processing,completed,warning,failed"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_lines" type="object" class="oe_stat_button" icon="fa-list">
+                            <field name="total_rows" string="Log Baris" widget="statinfo"/>
+                        </button>
+                        <button name="action_view_pivot" type="object" class="oe_stat_button" icon="fa-table" invisible="total_rows == 0">
+                            <div class="o_stat_info">
+                                <span class="o_stat_text">Analisis</span>
+                                <span class="o_stat_text">Pivot</span>
+                            </div>
+                        </button>
+                        <button name="action_view_warnings" type="object" class="oe_stat_button text-warning" icon="fa-exclamation-triangle" invisible="total_warning == 0">
+                            <field name="total_warning" string="Peringatan" widget="statinfo"/>
+                        </button>
+                        <button name="action_view_errors" type="object" class="oe_stat_button text-danger" icon="fa-times-circle" invisible="total_error == 0">
+                            <field name="total_error" string="Gagal" widget="statinfo"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <label for="name" string="Nomor Referensi"/>
+                        <h1>
+                            <field name="name" readonly="1"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Informasi Eksekusi">
+                            <field name="date" readonly="1"/>
+                            <field name="user_id" readonly="1"/>
+                            <field name="company_id" groups="base.group_multi_company" readonly="state != 'draft'"/>
+                        </group>
+                        <group string="Sumber Data">
+                            <field name="source_type" readonly="state == 'processing'"/>
+                            <field name="google_sheet_url" placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing" invisible="source_type != 'google_sheet'" readonly="state == 'processing'"/>
+                            <field name="file" filename="filename" invisible="source_type != 'file'" readonly="state == 'processing'"/>
+                            <field name="filename" invisible="1"/>
+                        </group>
+                    </group>
+
+                    <field name="summary_html" widget="html" readonly="1" invisible="not summary_html" nolabel="1"/>
+
+                    <div class="alert alert-danger mt-2" role="alert" invisible="not error_message">
+                        <strong>Penyebab Kegagalan:</strong>
+                        <field name="error_message" readonly="1" class="d-block mt-1"/>
+                    </div>
+
+                    <notebook>
+                        <page string="Akun (COA)" name="tab_accounts" invisible="not account_line_ids">
+                            <field name="account_line_ids" readonly="1">
+                                <list string="Log Akun (COA)" default_order="row_number asc, id asc" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'">
+                                    <field name="row_number"/>
+                                    <field name="record_identifier"/>
+                                    <field name="record_name"/>
+                                    <field name="status" widget="badge" decoration-success="status == 'success'" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'"/>
+                                    <field name="message"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Jurnal" name="tab_journals" invisible="not journal_line_ids">
+                            <field name="journal_line_ids" readonly="1">
+                                <list string="Log Jurnal" default_order="row_number asc, id asc" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'">
+                                    <field name="row_number"/>
+                                    <field name="record_identifier"/>
+                                    <field name="record_name"/>
+                                    <field name="status" widget="badge" decoration-success="status == 'success'" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'"/>
+                                    <field name="message"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Kas &amp; Bank" name="tab_kas_bank" invisible="not kas_bank_line_ids">
+                            <field name="kas_bank_line_ids" readonly="1">
+                                <list string="Log Saldo Kas &amp; Bank" default_order="row_number asc, id asc" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'">
+                                    <field name="row_number"/>
+                                    <field name="record_identifier"/>
+                                    <field name="record_name"/>
+                                    <field name="status" widget="badge" decoration-success="status == 'success'" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'"/>
+                                    <field name="message"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Aset Tetap" name="tab_assets" invisible="not asset_line_ids">
+                            <field name="asset_line_ids" readonly="1">
+                                <list string="Log Aset Tetap" default_order="row_number asc, id asc" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'">
+                                    <field name="row_number"/>
+                                    <field name="record_identifier"/>
+                                    <field name="record_name"/>
+                                    <field name="status" widget="badge" decoration-success="status == 'success'" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'"/>
+                                    <field name="message"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Kontak / Partner" name="tab_partners" invisible="not partner_line_ids">
+                            <field name="partner_line_ids" readonly="1">
+                                <list string="Log Partner" default_order="row_number asc, id asc" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'">
+                                    <field name="row_number"/>
+                                    <field name="record_identifier"/>
+                                    <field name="record_name"/>
+                                    <field name="status" widget="badge" decoration-success="status == 'success'" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'"/>
+                                    <field name="message"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Saldo Awal Hutang / Piutang" name="tab_moves" invisible="not move_line_ids">
+                            <field name="move_line_ids" readonly="1">
+                                <list string="Log Transaksi Saldo Awal" default_order="row_number asc, id asc" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'">
+                                    <field name="sheet_name"/>
+                                    <field name="row_number"/>
+                                    <field name="record_identifier"/>
+                                    <field name="record_name"/>
+                                    <field name="status" widget="badge" decoration-success="status == 'success'" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'"/>
+                                    <field name="message"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Laporan &amp; Analitik" name="tab_reports" invisible="not report_analytic_line_ids">
+                            <field name="report_analytic_line_ids" readonly="1">
+                                <list string="Log Laporan &amp; Analitik" default_order="row_number asc, id asc" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'">
+                                    <field name="sheet_name"/>
+                                    <field name="row_number"/>
+                                    <field name="record_identifier"/>
+                                    <field name="record_name"/>
+                                    <field name="status" widget="badge" decoration-success="status == 'success'" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'"/>
+                                    <field name="message"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Semua Log Record" name="tab_all_lines">
+                            <field name="line_ids" readonly="1">
+                                <list string="Semua Log Baris" default_order="id asc" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'">
+                                    <field name="sheet_name"/>
+                                    <field name="row_number"/>
+                                    <field name="record_identifier"/>
+                                    <field name="record_name"/>
+                                    <field name="status" widget="badge" decoration-success="status == 'success'" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'"/>
+                                    <field name="message"/>
+                                </list>
+                            </field>
+                        </page>
+
+                        <page string="Ringkasan Statistik" name="statistics">
+                            <group col="4">
+                                <field name="total_rows" readonly="1"/>
+                                <field name="total_success" readonly="1"/>
+                                <field name="total_warning" readonly="1"/>
+                                <field name="total_skipped" readonly="1"/>
+                                <field name="total_error" readonly="1"/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- SEARCH VIEW: sf.import.history -->
+    <record id="view_sf_import_history_search" model="ir.ui.view">
+        <field name="name">sf.import.history.search</field>
+        <field name="model">sf.import.history</field>
+        <field name="arch" type="xml">
+            <search string="Cari Import Data Master">
+                <field name="name"/>
+                <field name="user_id"/>
+                <field name="google_sheet_url"/>
+                <field name="filename"/>
+                <separator/>
+                <filter string="Ada Peringatan / Duplikat" name="filter_warning" domain="[('state', '=', 'warning')]"/>
+                <filter string="Sukses Penuh" name="filter_completed" domain="[('state', '=', 'completed')]"/>
+                <filter string="Gagal" name="filter_failed" domain="[('state', '=', 'failed')]"/>
+                <group name="group_by">
+                    <filter string="Status" name="group_by_state" context="{'group_by': 'state'}"/>
+                    <filter string="User" name="group_by_user" context="{'group_by': 'user_id'}"/>
+                    <filter string="Perusahaan" name="group_by_company" context="{'group_by': 'company_id'}" groups="base.group_multi_company"/>
+                    <filter string="Tanggal" name="group_by_date" context="{'group_by': 'date:month'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ACTION: sf.import.history -->
+    <record id="action_sf_import_history" model="ir.actions.act_window">
+        <field name="name">Import Data Master</field>
+        <field name="res_model">sf.import.history</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_sf_import_history_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Belum ada data import master.
+            </p>
+            <p>
+                Klik tombol <b>Baru</b> untuk membuat tugas import baru via Google Sheet atau upload file Excel (.xlsx).
+            </p>
+        </field>
+    </record>
+
+    <!-- =================================================== -->
+    <!-- SF.IMPORT.HISTORY.LINE VIEWS                        -->
+    <!-- =================================================== -->
+
+    <!-- LIST VIEW: sf.import.history.line -->
+    <record id="view_sf_import_history_line_tree" model="ir.ui.view">
+        <field name="name">sf.import.history.line.list</field>
+        <field name="model">sf.import.history.line</field>
+        <field name="arch" type="xml">
+            <list string="Detail Log Baris" default_order="row_number asc, id asc" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'">
+                <field name="history_id"/>
+                <field name="sheet_name"/>
+                <field name="row_number"/>
+                <field name="record_identifier"/>
+                <field name="record_name"/>
+                <field name="status" widget="badge" decoration-success="status == 'success'" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'"/>
+                <field name="message"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- FORM VIEW: sf.import.history.line (DEDICATED FORM / SHEET) -->
+    <record id="view_sf_import_history_line_form" model="ir.ui.view">
+        <field name="name">sf.import.history.line.form</field>
+        <field name="model">sf.import.history.line</field>
+        <field name="arch" type="xml">
+            <form string="Detail Log Baris">
+                <header>
+                    <field name="status" widget="statusbar" statusbar_visible="success,warning,skipped,error"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="record_identifier" string="Kode / Identifier"/>
+                        <h1>
+                            <field name="record_identifier" readonly="1"/>
+                        </h1>
+                        <h3 invisible="not record_name">
+                            <field name="record_name" readonly="1"/>
+                        </h3>
+                    </div>
+                    <group>
+                        <group string="Lokasi Spreadsheet">
+                            <field name="history_id" readonly="1"/>
+                            <field name="sheet_name" readonly="1"/>
+                            <field name="row_number" readonly="1"/>
+                        </group>
+                        <group string="Hasil Eksekusi">
+                            <field name="status" widget="badge" readonly="1" decoration-success="status == 'success'" decoration-warning="status == 'warning'" decoration-danger="status == 'error'" decoration-muted="status == 'skipped'"/>
+                        </group>
+                    </group>
+                    <group string="Keterangan Detail / Pesan Sistem">
+                        <field name="message" readonly="1" nolabel="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- SEARCH VIEW: sf.import.history.line -->
+    <record id="view_sf_import_history_line_search" model="ir.ui.view">
+        <field name="name">sf.import.history.line.search</field>
+        <field name="model">sf.import.history.line</field>
+        <field name="arch" type="xml">
+            <search string="Cari Detail Log">
+                <field name="record_identifier"/>
+                <field name="record_name"/>
+                <field name="sheet_name"/>
+                <field name="message"/>
+                <field name="history_id"/>
+                <separator/>
+                <filter string="Peringatan / Duplikat" name="filter_warning" domain="[('status', '=', 'warning')]"/>
+                <filter string="Gagal / Error" name="filter_error" domain="[('status', '=', 'error')]"/>
+                <filter string="Dilewati" name="filter_skipped" domain="[('status', '=', 'skipped')]"/>
+                <filter string="Sukses" name="filter_success" domain="[('status', '=', 'success')]"/>
+                <group name="group_by">
+                    <filter string="Sheet" name="group_by_sheet" context="{'group_by': 'sheet_name'}"/>
+                    <filter string="Status" name="group_by_status" context="{'group_by': 'status'}"/>
+                    <filter string="Riwayat Import" name="group_by_history" context="{'group_by': 'history_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- PIVOT VIEW: sf.import.history.line -->
+    <record id="view_sf_import_history_line_pivot" model="ir.ui.view">
+        <field name="name">sf.import.history.line.pivot</field>
+        <field name="model">sf.import.history.line</field>
+        <field name="arch" type="xml">
+            <pivot string="Pivot Analisis Log Baris Import" sample="1">
+                <field name="sheet_name" type="row"/>
+                <field name="status" type="col"/>
+            </pivot>
+        </field>
+    </record>
+
+    <!-- GRAPH VIEW: sf.import.history.line -->
+    <record id="view_sf_import_history_line_graph" model="ir.ui.view">
+        <field name="name">sf.import.history.line.graph</field>
+        <field name="model">sf.import.history.line</field>
+        <field name="arch" type="xml">
+            <graph string="Grafik Analisis Log Import" type="bar" sample="1">
+                <field name="sheet_name"/>
+                <field name="status"/>
+            </graph>
+        </field>
+    </record>
+
+    <!-- ACTION: sf.import.history.line -->
+    <record id="action_sf_import_history_line" model="ir.actions.act_window">
+        <field name="name">Detail Log Import</field>
+        <field name="res_model">sf.import.history.line</field>
+        <field name="view_mode">list,pivot,graph,form</field>
+        <field name="search_view_id" ref="view_sf_import_history_line_search"/>
+    </record>
+
+    <!-- =================================================== -->
+    <!-- MENU ITEMS                                          -->
+    <!-- =================================================== -->
+
+    <!-- Menu di Accounting > Configuration -->
+    <menuitem id="menu_sf_import_history_accounting"
+        name="Import Data Master"
+        parent="account.menu_finance_configuration"
+        action="action_sf_import_history"
+        groups="account.group_account_manager"
+        sequence="99"/>
+
+    <!-- Menu di Administration / Technical -->
+    <menuitem id="menu_sf_import_history_settings"
+        name="Import Data Master"
+        parent="base.menu_administration"
+        action="action_sf_import_history"
+        groups="base.group_system"
+        sequence="5"/>
+</odoo>

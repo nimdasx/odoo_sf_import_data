@@ -41,11 +41,4 @@
         <field name="view_mode">form</field>
         <field name="target">new</field>
     </record>
-
-    <menuitem id="master_data_import_wizard_menu"
-        name="Import Data Master"
-        parent="base.menu_administration"
-        action="master_data_import_wizard_action"
-        groups="base.group_system"
-        sequence="4"/>
 </odoo>

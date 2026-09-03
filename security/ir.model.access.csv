@@ -1,2 +1,6 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_sf_import_data_wizard,sf.import.data.wizard,model_sf_import_data_wizard,base.group_system,1,1,1,1
+access_sf_import_history_system,sf.import.history.system,model_sf_import_history,base.group_system,1,1,1,1
+access_sf_import_history_account,sf.import.history.account,model_sf_import_history,account.group_account_manager,1,1,1,1
+access_sf_import_history_line_system,sf.import.history.line.system,model_sf_import_history_line,base.group_system,1,1,1,1
+access_sf_import_history_line_account,sf.import.history.line.account,model_sf_import_history_line,account.group_account_manager,1,1,1,1

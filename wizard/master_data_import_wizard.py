@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from odoo import fields, models
 from odoo.exceptions import UserError
 
-from ..hooks import run_import
+from ..tools.import_engine import run_import
 
 GOOGLE_SHEET_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
 
@@ -27,34 +27,31 @@ class MasterDataImportWizard(models.TransientModel):
 
     def action_import(self):
         self.ensure_one()
-        if self.file:
-            if not self.filename or not self.filename.lower().endswith(".xlsx"):
-                raise UserError("File harus berformat .xlsx")
-            content = base64.b64decode(self.file)
-        elif self.google_sheet_url:
-            content = self._download_google_sheet(self.google_sheet_url)
-        else:
+        if not self.file and not self.google_sheet_url:
             raise UserError("Isi salah satu: upload File Excel atau Link Google Sheet.")
 
-        try:
-            wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-        except Exception as e:
-            raise UserError(
-                "File yang diimport bukan file Excel (.xlsx) yang valid."
-            ) from e
+        if self.file and (not self.filename or not self.filename.lower().endswith(".xlsx")):
+            raise UserError("File harus berformat .xlsx")
 
-        run_import(self.env, wb)
+        history_vals = {
+            "source_type": "file" if self.file else "google_sheet",
+            "filename": self.filename,
+            "file": self.file,
+            "google_sheet_url": self.google_sheet_url,
+            "company_id": self.env.company.id,
+            "user_id": self.env.user.id,
+        }
+        history = self.env["sf.import.history"].create(history_vals)
+        history.action_run_import()
 
-        # Push the success toast over the bus instead of returning a client
-        # action, so the wizard can close itself (act_window_close) in the
-        # same response instead of staying open showing the notification.
-        self.env["bus.bus"]._sendone(self.env.user.partner_id, "simple_notification", {
-            "title": "Import selesai",
-            "message": "Data master berhasil diimport.",
-            "type": "success",
-            "sticky": False,
-        })
-        return {"type": "ir.actions.act_window_close"}
+        return {
+            "name": f"Riwayat Import: {history.name}",
+            "type": "ir.actions.act_window",
+            "res_model": "sf.import.history",
+            "res_id": history.id,
+            "view_mode": "form",
+            "target": "current",
+        }
 
     def _download_google_sheet(self, url):
         """Convert a Google Sheets share link (…/edit?usp=sharing, …/edit#gid=0,

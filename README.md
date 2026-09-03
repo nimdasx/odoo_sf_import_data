@@ -1,17 +1,64 @@
-# Import Data Master (xlsx)
+# Import Data Master (xlsx & Google Sheets)
 
-Modul shared untuk import Chart of Accounts (CoA), partner, jurnal, kas/bank, asset tetap, dan opening balance dari satu file Excel / Google Sheets.
+Modul shared untuk import Chart of Accounts (CoA), kontak partner, jurnal akuntansi, saldo awal kas & bank, aset tetap & depresiasi, saldo awal hutang & piutang, struktur analitik, serta penyesuaian nomenklatur laporan keuangan dari satu file Excel atau Google Sheets.
 
+- **Versi**: `19.0.1.1.0`
 - **Dependencies**: `accountant` (Odoo Enterprise), Python: `openpyxl`, `requests`
 - **Fitur Bawaan**: Relabel `account_type` ke Bahasa Indonesia secara otomatis (`data/ir.model.fields.selection.csv`).
 - **Template Google Sheet**: [Template Import Data Master (Google Sheets)](https://docs.google.com/spreadsheets/d/1Hs-XjWxnb8qFXmuTXrZHzpJnQw4aXy_LuqDtuFQzAGY/edit?usp=sharing)
 
 ---
 
+## Fitur Utama
+
+1. **Manajemen Riwayat Import (`sf.import.history`)**:
+   - Setiap proses import tercatat otomatis dalam riwayat resmi (`IMP/YYYY/MM/XXXX`).
+   - Menyimpan tanggal eksekusi, user yang menjalankan, file `.xlsx` atau URL Google Sheet, dan status akhir (*Draft*, *Sedang Diproses*, *Selesai*, *Peringatan / Duplikat*, *Gagal*).
+   - Dilengkapi kartu ringkasan visual (*summary card*) yang menampilkan statistik jumlah baris sukses, peringatan, skip, dan error.
+
+2. **Logging Rinci per Record (`sf.import.history.line`)**:
+   - Pencatatan log komprehensif untuk **seluruh sheet**: `company`, `res.partner`, `account.account`, `account.journal`, `account.asset`, `kas_bank`, `vendor_bill`, `customer_invoice`, `account.analytic.*`, dan `account.report.*`.
+   - **Form Sheet Khusus**: Setiap baris log dapat diklik untuk melihat detail nomor baris spreadsheet, identifier/kode, nama record, statusbadge, dan pesan sistem lengkap.
+
+3. **Tampilan Form Multi-Tab per Sheet**:
+   - Baris log tidak dicampur aduk dalam satu daftar panjang, melainkan **dikelompokkan ke tab khusus**:
+     - 📑 **Tab Akun (COA)**: Log bagan akun dan saldo awal neraca.
+     - 📑 **Tab Jurnal**: Log konfigurasi buku jurnal.
+     - 📑 **Tab Kas & Bank**: Log mutasi saldo awal rekening kas dan bank.
+     - 📑 **Tab Aset Tetap**: Log pendaftaran aset tetap dan depresiasi.
+     - 📑 **Tab Kontak / Partner**: Log sinkronisasi partner / kontak.
+     - 📑 **Tab Saldo Awal Hutang / Piutang**: Log transaksi saldo awal faktur vendor dan customer.
+     - 📑 **Tab Laporan & Analitik**: Log profil perusahaan, rencana analitik, akun analitik, dan baris laporan keuangan.
+     - 📑 **Tab Semua Log Record**: Tampilan global seluruh baris dari semua sheet.
+     - 📑 **Tab Ringkasan Statistik**: Rangkuman angka kalkulasi metrik import.
+   - *Kondisional*: Tab otomatis tersembunyi jika sheet tersebut tidak terdapat pada file yang diunggah.
+
+4. **Analisis Matriks & Visualisasi (Pivot & Graph View)**:
+   - **Pivot View**: Matriks interaktif dengan sumbu baris (*Row*) per nama sheet, sumbu kolom (*Column*) per status eksekusi (*Sukses*, *Peringatan*, *Dilewati*, *Gagal*), dan ukuran cacah baris (*Count*).
+   - **Graph View**: Grafik batang (*bar chart*) komposisi hasil import per sheet.
+   - **Smart Buttons**: Akses instan di header form untuk *Log Baris*, *Analisis Pivot*, *Peringatan*, dan *Gagal*.
+
+5. **Deteksi Otomatis Duplikat & Proteksi Integritas**:
+   - Deteksi otomatis kode ganda (*duplicate code*) pada sheet `account.account`. Baris duplikat ditandai badge kuning `Peringatan` dengan catatan detail referensi baris awal.
+   - Pencegahan penimpaan saldo awal jika sudah terdapat transaksi operasional manual yang diinput oleh pengguna.
+
+6. **Arsitektur Bersih (`tools/import_engine.py`)**:
+   - Seluruh logika bisnis import dimodularisasi ke dalam folder `tools/import_engine.py`.
+   - Root `hooks.py` disediakan sebagai *backward-compatibility wrapper* sehingga modul klien lama (`sf_lazis_unisia_konfig`, `sf_sma_uii_konfig`, dll.) tetap kompatibel 100% tanpa breaking changes.
+
+---
+
 ## Cara Pakai
 
-### 1. Bundled di Modul Client (Otomatis saat Install)
-Taruh satu file `.xlsx` di folder `data/` modul client, lalu panggil di `post_init_hook`:
+### 1. Antarmuka Web (Menu Import Data Master)
+Buka menu **Accounting / Invoicing → Configuration → Import Data Master** (atau via **Settings / Technical → Import Data Master**):
+1. Klik tombol **Baru**.
+2. Pilih sumber data: **Google Sheets URL** (pastikan akses publik *Anyone with the link*) atau **Upload File (.xlsx)**.
+3. Klik tombol **Jalankan Import**.
+4. Sistem akan memproses seluruh sheet, menampilkan status progress, summary card, serta membagi hasil log ke tab-tab per sheet.
+
+### 2. Bundled di Modul Client (Otomatis saat Install Modul)
+Taruh file `.xlsx` master data di folder `data/` modul client, lalu panggil pada `post_init_hook`:
 
 ```python
 # hooks.py (modul client)
@@ -31,19 +78,22 @@ def post_init_hook(env):
 }
 ```
 
-### 2. Manual via UI Wizard
-Buka menu **Settings → Import Data Master** (Hak akses: Administrator):
-- Upload file `.xlsx`, **atau**
-- Masukkan URL Google Sheets publik (*Anyone with the link*).
-- Duplikasi template master data berikut (*File → Make a copy*): [Template Google Sheets](https://docs.google.com/spreadsheets/d/1Hs-XjWxnb8qFXmuTXrZHzpJnQw4aXy_LuqDtuFQzAGY/edit?usp=sharing).
-
-### 3. Re-run via Odoo Shell (Docker)
+### 3. Eksekusi via Odoo Shell (Docker)
 ```bash
 cat <<'EOF' | docker compose exec -T odoo odoo shell -c /etc/odoo/odoo.conf --db_host=psqlx -r odoo -w <POSTGRES_PASSWORD> -d <db> --stop-after-init
-from odoo.addons.odoo_sf_import_data.hooks import import_bundled_data
-import_bundled_data(env, "/mnt/extra-addons/<nama_module_client>")
+# Opsi A: Eksekusi dengan pencatatan Riwayat & Logging UI
+history = env["sf.import.history"].create({
+    "source_type": "google_sheet",
+    "google_sheet_url": "https://docs.google.com/spreadsheets/d/.../edit?usp=sharing",
+})
+history.action_run_import()
 env.cr.commit()
-print("DONE")
+print(f"Selesai: {history.name}, Total baris: {history.total_rows}")
+
+# Opsi B: Eksekusi langsung dari folder modul client
+from odoo.addons.odoo_sf_import_data.hooks import import_bundled_data
+import_bundled_data(env, "/mnt/odoo_addon_shared/<nama_module_client>")
+env.cr.commit()
 EOF
 ```
 
@@ -52,7 +102,7 @@ EOF
 ## Urutan & Aturan Sheet
 
 Urutan import dijalankan secara sekuensial:
-`company` → `res.partner` → `account.account` → `account.journal` → `account.asset` → `kas_bank (opsional)` → `vendor_bill` → `customer_invoice` → `account.analytic.plan` → `account.analytic.account` → `account.report` → `account.report.line`
+`company` → `res.partner` → `account.account` → `account.journal` → `account.asset` → `kas_bank` → `vendor_bill` → `customer_invoice` → `account.analytic.plan` → `account.analytic.account` → `account.report` → `account.report.line`
 
 ---
 
@@ -205,7 +255,7 @@ Menyesuaikan nama baris laporan keuangan:
 
 ---
 
-## Konfigurasi Flags (`hooks.py`)
+## Konfigurasi Flags (`tools/import_engine.py`)
 
 - `VALIDATE_IMPORTED_ASSETS` (default `False`): Set `True` jika ingin asset langsung tervalidasi setelah di-import.
 - `POST_OPENING_MOVES` (default `False`): Set `True` jika ingin opening move partner langsung ter-post.

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <record id="seq_sf_import_history" model="ir.sequence">
+        <field name="name">Riwayat Import Data Master</field>
+        <field name="code">sf.import.history</field>
+        <field name="prefix">IMP/%(year)s/%(month)s/</field>
+        <field name="padding">4</field>
+        <field name="company_id" eval="False"/>
+    </record>
+</odoo>
