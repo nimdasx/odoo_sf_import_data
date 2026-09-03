@@ -641,59 +641,109 @@ def _import_account_report_line(env, wb):
 
 
 def _import_kas_bank(env, wb, default_date):
-    """Import kas/bank opening balances as account.bank.statement.line records
-    so they show up as Bank Transactions (a plain account.move posted through
-    the journal does not), matching how a manually-entered transaction works.
-    Note: creating a statement line always posts it immediately (Odoo core
-    behavior) - POST_OPENING_MOVES does not apply here.
+    """Import kas/bank opening balances as account.bank.statement.line records.
+    Source:
+    1. Direct opening_balance column on sheet "account.journal" (preferred).
+    2. Legacy sheet "kas_bank" (fallback if sheet exists and has data).
     """
     company = env.ref("base.main_company")
     transfer_total = 0.0
-    for move_data in _move_rows(wb, "kas_bank", default_date):
-        journal = env["account.journal"].search([
-            ("name", "=", move_data["journal"]),
-            ("company_id", "=", company.id),
-        ], limit=1)
-        if not journal:
-            _logger.warning("Jurnal %r untuk kas_bank tidak ditemukan - dilewati.", move_data["journal"])
-            continue
 
-        amount = sum(
-            (line["debit"] or 0.0) - (line["credit"] or 0.0)
-            for line in move_data["lines"]
-            if _account_by_code_name(env, line["account"]) == journal.default_account_id
-        )
-        # The statement line's counterpart carries -amount on Liquidity
-        # Transfer, so the opening balance needs +amount to net it out -
-        # accumulate from the sheet regardless of whether this particular
-        # line is (re)created below, so already-posted lines still count.
-        transfer_total += amount
+    # 1. Preferred source: read from sheet "account.journal" column "opening_balance"
+    journal_has_balance = False
+    if "account.journal" in wb.sheetnames:
+        columns = ("id", "name", "type", "code", "opening_balance")
+        rows = list(_sheet_rows(wb, "account.journal", columns))
+        if any(r.get("opening_balance") not in (None, "") for r in rows):
+            journal_has_balance = True
 
-        existing = env.ref(move_data["id"], raise_if_not_found=False)
-        if existing:
-            if existing.is_reconciled:
-                _logger.warning("Bank statement line %r sudah direkonsiliasi - dilewati.", move_data["id"])
+            # Clean up all existing opening statement lines on default_date for bank/cash journals
+            all_bank_cash = env["account.journal"].search([
+                ("type", "in", ("bank", "cash")),
+                ("company_id", "=", company.id),
+            ])
+            existing_lines = env["account.bank.statement.line"].search([
+                ("journal_id", "in", all_bank_cash.ids),
+                ("date", "=", default_date),
+            ])
+            for old in existing_lines:
+                if old.is_reconciled:
+                    old.line_ids.remove_move_reconcile()
+                old.unlink()
+
+            for row in rows:
+                raw_bal = row.get("opening_balance")
+                if raw_bal in (None, ""):
+                    continue
+                try:
+                    amount = float(raw_bal)
+                except (ValueError, TypeError):
+                    _logger.warning("Nilai opening_balance %r pada jurnal %r tidak valid - dilewati.", raw_bal, row.get("name"))
+                    continue
+
+                journal = env.ref(row["id"], raise_if_not_found=False)
+                if not journal and row.get("code"):
+                    journal = env["account.journal"].search([
+                        ("code", "=", str(row["code"]).strip()),
+                        ("company_id", "=", company.id),
+                    ], limit=1)
+                if not journal and row.get("name"):
+                    journal = env["account.journal"].search([
+                        ("name", "=", str(row["name"]).strip()),
+                        ("company_id", "=", company.id),
+                    ], limit=1)
+
+                if not journal:
+                    _logger.warning("Jurnal %r tidak ditemukan untuk saldo awal kas/bank - dilewati.", row.get("name"))
+                    continue
+
+                transfer_total += amount
+                line_xml_id = f"{MODULE}.statement_line_{row['id'].replace('.', '_')}"
+
+
+
+                values = {
+                    "journal_id": journal.id,
+                    "date": default_date,
+                    "payment_ref": "Saldo Awal",
+                    "amount": amount,
+                    "counterpart_account_id": company.transfer_account_id.id,
+                }
+                _get_or_create(env, "account.bank.statement.line", line_xml_id, values)
+
+    # 2. Fallback source: legacy sheet "kas_bank"
+    if not journal_has_balance and "kas_bank" in wb.sheetnames:
+        for move_data in _move_rows(wb, "kas_bank", default_date):
+            journal = env["account.journal"].search([
+                ("name", "=", move_data["journal"]),
+                ("company_id", "=", company.id),
+            ], limit=1)
+            if not journal:
+                _logger.warning("Jurnal %r untuk kas_bank tidak ditemukan - dilewati.", move_data["journal"])
                 continue
-            # counterpart_account_id is a create()-only pseudo-field (Odoo
-            # pops it before writing), so an existing statement line can't be
-            # updated via write() - discard and recreate it instead.
-            # In Odoo core, statement lines are auto-posted on create, but
-            # unlinking an unreconciled line safely deletes both the statement
-            # line and its underlying posted move.
-            existing.unlink()
 
-        values = {
-            "journal_id": journal.id,
-            "date": move_data["date"],
-            "payment_ref": move_data["ref"],
-            "amount": amount,
-            # Route the counterpart to the reconcilable "Liquidity Transfer"
-            # account instead of the journal's (non-reconcilable) suspense
-            # account, so it can be matched against the opening_debit/credit
-            # counterpart entry on account.account.
-            "counterpart_account_id": company.transfer_account_id.id,
-        }
-        _get_or_create(env, "account.bank.statement.line", move_data["id"], values)
+            amount = sum(
+                (line["debit"] or 0.0) - (line["credit"] or 0.0)
+                for line in move_data["lines"]
+                if _account_by_code_name(env, line["account"]) == journal.default_account_id
+            )
+            transfer_total += amount
+
+            existing = env.ref(move_data["id"], raise_if_not_found=False)
+            if existing:
+                if existing.is_reconciled:
+                    _logger.warning("Bank statement line %r sudah direkonsiliasi - dilewati.", move_data["id"])
+                    continue
+                existing.unlink()
+
+            values = {
+                "journal_id": journal.id,
+                "date": move_data["date"],
+                "payment_ref": move_data["ref"],
+                "amount": amount,
+                "counterpart_account_id": company.transfer_account_id.id,
+            }
+            _get_or_create(env, "account.bank.statement.line", move_data["id"], values)
 
     _write_opening_balances(env, {
         company.transfer_account_id: [max(transfer_total, 0.0), max(-transfer_total, 0.0)],
@@ -879,6 +929,8 @@ def run_import(env, wb):
 
     company = env.ref("base.main_company")
     company.write({"account_opening_date": fiscal_year_start})
+    if company.account_opening_move_id and company.account_opening_move_id.state == "posted":
+        company.account_opening_move_id.button_draft()
     if company.account_opening_move_id and company.account_opening_move_id.state == "draft":
         company.account_opening_move_id.date = balance_date
 
