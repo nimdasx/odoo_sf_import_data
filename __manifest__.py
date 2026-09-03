@@ -1,6 +1,6 @@
 {
-    "name": "Import Data Master (xlsx)",
-    "version": "19.0.1.0.0",
+    "name": "Import Data Master",
+    "version": "19.0.1.0.1",
     "category": "SF",
     "summary": "Import CoA, jurnal, asset, kas/bank, dan opening balance dari file Excel",
     "author": "Nimdasx",
