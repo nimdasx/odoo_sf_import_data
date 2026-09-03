@@ -5,7 +5,7 @@
     "summary": "Import CoA, jurnal, asset, kas/bank, dan opening balance dari file Excel dengan riwayat dan logging",
     "author": "Nimdasx",
     "license": "OEEL-1",
-    "depends": ["accountant"],
+    "depends": ["accountant", "mail"],
     "data": [
         "security/ir.model.access.csv",
         "data/ir.model.fields.selection.csv",

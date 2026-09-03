@@ -3,7 +3,7 @@
 Modul shared untuk import Chart of Accounts (CoA), kontak partner, jurnal akuntansi, saldo awal kas & bank, aset tetap & depresiasi, saldo awal hutang & piutang, struktur analitik, serta penyesuaian nomenklatur laporan keuangan dari satu file Excel atau Google Sheets.
 
 - **Versi**: `19.0.1.1.0`
-- **Dependencies**: `accountant` (Odoo Enterprise), Python: `openpyxl`, `requests`
+- **Dependencies**: `accountant`, `mail` (Odoo Enterprise), Python: `openpyxl`, `requests`
 - **Fitur Bawaan**: Relabel `account_type` ke Bahasa Indonesia secara otomatis (`data/ir.model.fields.selection.csv`).
 - **Template Google Sheet**: [Template Import Data Master (Google Sheets)](https://docs.google.com/spreadsheets/d/1Hs-XjWxnb8qFXmuTXrZHzpJnQw4aXy_LuqDtuFQzAGY/edit?usp=sharing)
 
@@ -42,7 +42,12 @@ Modul shared untuk import Chart of Accounts (CoA), kontak partner, jurnal akunta
    - Deteksi otomatis kode ganda (*duplicate code*) pada sheet `account.account`. Baris duplikat ditandai badge kuning `Peringatan` dengan catatan detail referensi baris awal.
    - Pencegahan penimpaan saldo awal jika sudah terdapat transaksi operasional manual yang diinput oleh pengguna.
 
-6. **Arsitektur Bersih (`tools/import_engine.py`)**:
+6. **Chatter & Jejak Audit (`mail.thread`, `mail.activity.mixin`)**:
+   - Dilengkapi widget **Chatter** di bagian bawah form view untuk mengirim pesan, log internal note, dan aktivitas.
+   - **Otomatis Posting Log Eksekusi**: Sistem secara otomatis mencatat pesan saat proses import dimulai, ringkasan saat selesai (jumlah baris sukses, peringatan, skip, error), serta detail kegagalan jika terjadi error.
+   - **Field Tracking**: Perubahan status, user, tanggal, dan metrik total baris tercatat pada log jejak audit.
+
+7. **Arsitektur Bersih (`tools/import_engine.py`)**:
    - Seluruh logika bisnis import dimodularisasi ke dalam folder `tools/import_engine.py`.
    - Root `hooks.py` disediakan sebagai *backward-compatibility wrapper* sehingga modul klien lama (`sf_lazis_unisia_konfig`, `sf_sma_uii_konfig`, dll.) tetap kompatibel 100% tanpa breaking changes.
 

@@ -2,10 +2,12 @@ import base64
 import io
 import re
 import requests
+from markupsafe import Markup
 from openpyxl import load_workbook
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError
+from odoo.tools import html_escape
 
 from ..tools.import_engine import run_import
 
@@ -15,6 +17,7 @@ GOOGLE_SHEET_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
 class SfImportHistory(models.Model):
     _name = "sf.import.history"
     _description = "Riwayat Import Data Master"
+    _inherit = ["mail.thread", "mail.activity.mixin"]
     _order = "date desc, id desc"
 
     name = fields.Char(
@@ -22,23 +25,27 @@ class SfImportHistory(models.Model):
         required=True,
         copy=False,
         default="Draft Import",
+        tracking=True,
     )
     company_id = fields.Many2one(
         "res.company",
         string="Perusahaan",
         default=lambda self: self.env.company,
         required=True,
+        tracking=True,
     )
     user_id = fields.Many2one(
         "res.users",
         string="Dijalankan Oleh",
         default=lambda self: self.env.user,
         required=True,
+        tracking=True,
     )
     date = fields.Datetime(
         string="Waktu Eksekusi",
         default=fields.Datetime.now,
         required=True,
+        tracking=True,
     )
     source_type = fields.Selection(
         [
@@ -48,10 +55,11 @@ class SfImportHistory(models.Model):
         string="Sumber Data",
         default="google_sheet",
         required=True,
+        tracking=True,
     )
-    filename = fields.Char(string="Nama File")
+    filename = fields.Char(string="Nama File", tracking=True)
     file = fields.Binary(string="File Excel (.xlsx)")
-    google_sheet_url = fields.Char(string="Google Sheet URL")
+    google_sheet_url = fields.Char(string="Google Sheet URL", tracking=True)
     state = fields.Selection(
         [
             ("draft", "Draft"),
@@ -63,12 +71,13 @@ class SfImportHistory(models.Model):
         string="Status",
         default="draft",
         required=True,
+        tracking=True,
     )
-    total_rows = fields.Integer(string="Total Baris", default=0)
-    total_success = fields.Integer(string="Sukses", default=0)
-    total_warning = fields.Integer(string="Peringatan / Duplikat", default=0)
-    total_skipped = fields.Integer(string="Dilewati", default=0)
-    total_error = fields.Integer(string="Gagal / Error", default=0)
+    total_rows = fields.Integer(string="Total Baris", default=0, tracking=True)
+    total_success = fields.Integer(string="Sukses", default=0, tracking=True)
+    total_warning = fields.Integer(string="Peringatan / Duplikat", default=0, tracking=True)
+    total_skipped = fields.Integer(string="Dilewati", default=0, tracking=True)
+    total_error = fields.Integer(string="Gagal / Error", default=0, tracking=True)
     summary_html = fields.Html(string="Ringkasan Hasil")
     error_message = fields.Text(string="Pesan Error")
     line_ids = fields.One2many(
@@ -171,6 +180,13 @@ class SfImportHistory(models.Model):
             "total_error": 0,
         })
 
+        source_info = html_escape(self.google_sheet_url if self.source_type == "google_sheet" else (self.filename or ""))
+        self.message_post(
+            body=Markup(f"<b>Proses import data master dimulai</b> dari sumber: <i>{source_info}</i>"),
+            message_type="notification",
+            subtype_xmlid="mail.mt_note",
+        )
+
         try:
             run_import(self.env, wb, history=self)
         except Exception as e:
@@ -178,6 +194,11 @@ class SfImportHistory(models.Model):
                 "state": "failed",
                 "error_message": str(e),
             })
+            self.message_post(
+                body=Markup(f"❌ <b>Import Gagal:</b><br/>{html_escape(str(e))}"),
+                message_type="comment",
+                subtype_xmlid="mail.mt_comment",
+            )
             raise
 
         # Hitung statistik akhir
@@ -226,6 +247,22 @@ class SfImportHistory(models.Model):
             "total_error": error_cnt,
             "summary_html": summary,
         })
+
+        if final_state == "warning":
+            msg_body = Markup(
+                f"⚠️ <b>Import data master selesai dengan peringatan/duplikat</b><br/>"
+                f"• Total Baris Diproses: <b>{total_cnt}</b><br/>"
+                f"• Sukses: <b>{success_cnt}</b><br/>"
+                f"• Peringatan: <b style='color:#e67e22;'>{warning_cnt}</b><br/>"
+                f"• Dilewati: <b>{skipped_cnt}</b><br/>"
+                f"• Gagal: <b style='color:#e74c3c;'>{error_cnt}</b>"
+            )
+        else:
+            msg_body = Markup(
+                f"✅ <b>Import data master selesai dengan sukses</b><br/>"
+                f"• Total Baris Diproses: <b>{total_cnt}</b> (seluruhnya berhasil disinkronkan)."
+            )
+        self.message_post(body=msg_body, message_type="notification", subtype_xmlid="mail.mt_note")
         return True
 
     def action_view_lines(self):
