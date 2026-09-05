@@ -17,7 +17,7 @@ Modul shared untuk import Chart of Accounts (CoA), kontak partner, jurnal akunta
    - Dilengkapi kartu ringkasan visual (*summary card*) yang menampilkan statistik jumlah baris sukses, peringatan, skip, dan error.
 
 2. **Logging Rinci per Record (`sf.import.history.line`)**:
-   - Pencatatan log komprehensif untuk **seluruh sheet**: `company`, `res.partner`, `account.account`, `account.journal`, `account.asset`, `kas_bank`, `vendor_bill`, `customer_invoice`, `account.analytic.*`, dan `account.report.*`.
+   - Pencatatan log komprehensif untuk **seluruh sheet**: `company`, `res.partner`, `account.account`, `account.journal`, `account.asset`, `vendor_bill`, `customer_invoice`, `account.analytic.*`, dan `account.report.*`.
    - **Form Sheet Khusus**: Setiap baris log dapat diklik untuk melihat detail nomor baris spreadsheet, identifier/kode, nama record, statusbadge, dan pesan sistem lengkap.
 
 3. **Tampilan Form Multi-Tab per Sheet**:
@@ -106,12 +106,30 @@ EOF
 
 ## Urutan & Aturan Sheet
 
-Urutan import dijalankan secara sekuensial:
-`company` → `res.partner` → `account.account` → `account.journal` → `account.asset` → `kas_bank` → `vendor_bill` → `customer_invoice` → `account.analytic.plan` → `account.analytic.account` → `account.report` → `account.report.line`
+Modul ini mendukung **dual format**: format nama sheet singkat (Google Sheet template) maupun format nama lengkap/klasik (.xlsx). Keduanya dapat digunakan secara bergantian.
+
+| No | Tipe / Model Data | Nama Singkat (Google Sheet) | Nama Lengkap / Klasik | Wajib / Opsional |
+|:---:|:---|:---:|:---|:---:|
+| 1 | Konfigurasi Perusahaan | `c` | `company` | **Wajib** (memuat `OPENING_BALANCE_DATE`) |
+| 2 | Kontak / Partner | `r.p` | `res.partner` | Opsional |
+| 3 | Chart of Accounts | `a.a` | `account.account` | **Wajib** |
+| 4 | Jurnal Akuntansi & Kas/Bank | `a.j` | `account.journal` | **Wajib** |
+| 5 | Aset Tetap & Depresiasi | `a.as` | `account.asset` | Opsional |
+| 6 | Saldo Awal Hutang (Vendor) | `v.b` | `vendor_bill` | Opsional |
+| 7 | Saldo Awal Piutang (Customer) | `c.i` | `customer_invoice` | Opsional |
+| 8 | Rencana Analitik | `a.an.p` | `account.analytic.plan` | Opsional |
+| 9 | Akun Analitik | `a.an.a` | `account.analytic.account` | Opsional |
+| 10 | Rename Laporan Keuangan | `a.r` | `account.report` | Opsional |
+| 11 | Rename Baris Laporan | `a.r.l` | `account.report.line` | Opsional |
+| — | Petunjuk (Informasi) | `p` | `petunjuk` | Informasi |
+
+
+Urutan eksekusi import otomatis dijalankan secara sekuensial:
+`c` (`company`) → `r.p` (`res.partner`) → `a.a` (`account.account`) → `a.j` (`account.journal`) → `a.as` (`account.asset`) → `v.b` (`vendor_bill`) → `c.i` (`customer_invoice`) → `a.an.p` (`account.analytic.plan`) → `a.an.a` (`account.analytic.account`) → `a.r` (`account.report`) → `a.r.l` (`account.report.line`)
 
 ---
 
-### 1. Sheet `company` (Key-Value)
+### 1. Sheet `company` / `c` (Key-Value)
 Menyimpan konfigurasi umum perusahaan dalam format pasangan kunci-nilai (Kolom A: Key, Kolom B: Value):
 - **`OPENING_BALANCE_DATE`** *(Wajib)*: Tanggal cutover saldo awal (mis. `2026-06-30`). Tahun buku Odoo (`account_opening_date`) otomatis menjadi `H+1` (`2026-07-01`).
 - **`logo`**: URL gambar logo (otomatis di-download & di-encode ke base64).
@@ -120,7 +138,7 @@ Menyimpan konfigurasi umum perusahaan dalam format pasangan kunci-nilai (Kolom A
 
 ---
 
-### 2. Sheet `res.partner` (Kontak / Partner)
+### 2. Sheet `res.partner` / `r.p` (Kontak / Partner)
 Master data kontak pelanggan, pemasok, donatur, muzakki, amil, atau karyawan:
 - **Kolom**: `id`, `name`, `email`, `phone`, `is_company`, `street`, `city`, `state`, `country_id`, `ref`.
 - **`is_company`**: Diisi `TRUE` untuk institusi/badan usaha, `FALSE` untuk individu.
@@ -128,7 +146,7 @@ Master data kontak pelanggan, pemasok, donatur, muzakki, amil, atau karyawan:
 
 ---
 
-### 3. Sheet `account.account` (Chart of Accounts & Saldo Awal)
+### 3. Sheet `account.account` / `a.a` (Chart of Accounts & Saldo Awal)
 Bagan akun (COA) beserta nilai saldo awal neraca:
 - **Kolom**: `id`, `code`, `name`, `account_type`, `opening_debit`, `opening_credit`, `active`.
 - **`account_type`**: Label Bahasa Indonesia (misal `Aktiva Lancar`, `Ekuitas`) atau kode teknis internal Odoo (misal `asset_current`, `equity`).
@@ -136,24 +154,24 @@ Bagan akun (COA) beserta nilai saldo awal neraca:
 
 > [!IMPORTANT]
 > **Aturan Akun Khusus (Jangan Diisi di Sheet Ini):**
-> - **Kas & Bank**: Kosongkan `opening_debit`/`opening_credit` di sheet ini. Saldo kas/bank diisi via kolom `opening_balance` di sheet `account.journal`.
-> - **Aset Tetap & Akumulasi Penyusutan**: Kosongkan jika menggunakan sheet `account.asset` agar nilai tidak tercatat ganda.
+> - **Kas & Bank**: Kosongkan `opening_debit`/`opening_credit` di sheet ini. Saldo kas/bank diisi via kolom `opening_balance` di sheet `account.journal` / `a.j`.
+> - **Aset Tetap & Akumulasi Penyusutan**: Kosongkan jika menggunakan sheet `account.asset` / `a.as` agar nilai tidak tercatat ganda.
 > - **Liquidity Transfer**: Dihitung otomatis dari akumulasi saldo kas/bank.
 > - **Laba Ditahan / Penyeimbang**: Dihitung otomatis oleh Odoo untuk menyeimbangkan total Debit dan Kredit.
 
 #### Panduan Posisi Saldo Normal (Debit / Kredit) per `account_type`
 
 | Kategori | Tipe Akun (Bahasa Indonesia) | Technical Type (`account_type`) | Posisi Saldo Normal | Keterangan & Catatan Khusus |
-| :--- | :--- | :--- | :---: | :--- |
-| **Aset** | Bank dan Tunai | `asset_cash` | **DEBIT** | Kosongkan di sheet ini, diisi via `opening_balance` di sheet `account.journal`. |
-| **Aset** | Piutang | `asset_receivable` | **DEBIT** | Disarankan lewat sheet `customer_invoice` agar ada rincian per partner. |
+| :--- | :--- | :--- | :--- | :---: | :--- |
+| **Aset** | Bank dan Tunai | `asset_cash` | **DEBIT** | Kosongkan di sheet ini, diisi via `opening_balance` di sheet `account.journal` / `a.j`. |
+| **Aset** | Piutang | `asset_receivable` | **DEBIT** | Disarankan lewat sheet `customer_invoice` / `c.i` agar ada rincian per partner. |
 | **Aset** | Cadangan Piutang Tak Tertagih *(Contra-Asset)* | `asset_receivable` / `asset_current` | **KREDIT** | Penyisihan piutang ragu-ragu. Masukkan di `opening_credit` (positif). |
 | **Aset** | Aktiva Lancar | `asset_current` | **DEBIT** | Persediaan (*inventory*), uang muka, perlengkapan, dll. |
 | **Aset** | Aktiva Tidak Lancar | `asset_non_current` | **DEBIT** | Investasi jangka panjang, piutang jangka panjang. |
 | **Aset** | Prabayar | `asset_prepayments` | **DEBIT** | Biaya dibayar dimuka (*prepaid expenses*), sewa dibayar dimuka. |
 | **Aset** | Aktiva Tetap | `asset_fixed` | **DEBIT** | Nilai perolehan aset tetap (tanah, bangunan, kendaraan, peralatan). |
 | **Aset** | Akumulasi Penyusutan *(Contra-Asset)* | `asset_fixed` / `asset_non_current` | **KREDIT** | **PENTING**: Masukkan di kolom `opening_credit` (positif), **jangan** angka minus di debit! |
-| **Liabilitas** | Utang | `liability_payable` | **KREDIT** | Disarankan lewat sheet `vendor_bill` agar ada rincian per partner. |
+| **Liabilitas** | Utang | `liability_payable` | **KREDIT** | Disarankan lewat sheet `vendor_bill` / `v.b` agar ada rincian per partner. |
 | **Liabilitas** | Kartu Kredit | `liability_credit_card` | **KREDIT** | Kewajiban kartu kredit korporasi. |
 | **Liabilitas** | Pasiva Terkini | `liability_current` | **KREDIT** | Utang lancar, utang gaji, utang pajak, pendapatan diterima dimuka. |
 | **Liabilitas** | Hutang Tidak Lancar | `liability_non_current` | **KREDIT** | Utang bank jangka panjang, obligasi, liabilitas sewa pembiayaan. |
@@ -171,7 +189,7 @@ Bagan akun (COA) beserta nilai saldo awal neraca:
 
 ---
 
-### 4. Sheet `account.journal` & Saldo Awal Kas/Bank
+### 4. Sheet `account.journal` / `a.j` & Saldo Awal Kas/Bank
 Buku jurnal operasional Odoo serta penentuan saldo awal kas & rekening bank:
 - **Kolom**: `id`, `sequence`, `name`, `type`, `code`, `default_account_id`, `Bank Feed`, **`opening_balance`** *(opsional)*.
 - **`type`**: `Bank`, `Kas`, `Penjualan`, `Pembelian`, atau `Lain-lain`.
@@ -179,11 +197,11 @@ Buku jurnal operasional Odoo serta penentuan saldo awal kas & rekening bank:
   - Sistem otomatis membuat record transaksi mutasi (*Bank Statement Line*) yang ter-posting langsung di dashboard jurnal terkait.
   - Akun lawan otomatis diarahkan ke akun **Liquidity Transfer** penyeimbang.
   - Rekening kas/bank yang bernilai 0 / kosong tidak akan dibuatkan baris transaksi dummy.
-- *(Opsional / Legacy)*: Sheet `kas_bank` terpisah tetap didukung sebagai cadangan jika kolom `opening_balance` di sheet ini tidak digunakan.
+
 
 ---
 
-### 5. Sheet `account.asset` (Aset Tetap & Depresiasi)
+### 5. Sheet `account.asset` / `a.as` (Aset Tetap & Depresiasi)
 Master aset tetap untuk manajemen depresiasi otomatis Odoo Enterprise:
 - **Kolom**: `id`, `name`, `original_value`, `acquisition_date`, `model_id`, `already_depreciated_amount_import` *(opsional)*.
 - **Opening Balance Otomatis**: Total `original_value` dan akumulasi depresiasi otomatis mengisi debit/kredit akun terkait pada opening move.
@@ -224,36 +242,36 @@ Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari:
 
 ---
 
-### 6. Sheet `vendor_bill` & `customer_invoice` (Rincian Utang & Piutang)
+### 6. Sheet `vendor_bill` / `v.b` & `customer_invoice` / `c.i` (Rincian Utang & Piutang)
 Digunakan jika saldo awal piutang atau utang ingin dipecah per partner / faktur belum lunas:
 - **Kolom**: `id`, `Reference`, `date`, `journal`, `line_ids/account`, `line_ids/debit`, `line_ids/credit`, `line_ids/name`, `line_ids/partner`, `line_ids/date_maturity`.
 - **Fungsi**: Membentuk journal entry saldo awal per vendor/customer sehingga umur piutang (*Aged Receivable*) dan umur utang (*Aged Payable*) tercatat akurat per rekanan.
-- Jika detail per partner tidak diperlukan, saldo awal piutang dan utang cukup diisi gelondongan pada sheet `account.account`.
+- Jika detail per partner tidak diperlukan, saldo awal piutang dan utang cukup diisi gelondongan pada sheet `account.account` / `a.a`.
 
 ---
 
-### 7. Sheet `account.analytic.plan` (Rencana Analitik)
+### 7. Sheet `account.analytic.plan` / `a.an.p` (Rencana Analitik)
 Kategori / dimensi pelaporan analitik (misal: Program Dakwah, Departemen, Proyek):
 - **Kolom**: `id`, `name`, `sequence`, `default_applicability`, `color`, `description` *(opsional)*, `parent_id` *(opsional)*.
 - **`default_applicability`**: Pilihan `Optional`, `Mandatory`, atau `Unavailable`.
 
 ---
 
-### 8. Sheet `account.analytic.account` (Akun Analitik)
+### 8. Sheet `account.analytic.account` / `a.an.a` (Akun Analitik)
 Pusat biaya (*cost center*) atau akun unit kerja di bawah rencana analitik:
 - **Kolom**: `id`, `name`, `plan_id`, `code` *(opsional)*, `active` *(opsional)*, `partner_id` *(opsional)*.
 - **`plan_id`**: Nama atau XML ID dari Rencana Analitik terkait.
 
 ---
 
-### 9. Sheet `account.report` (Rename Laporan Keuangan)
+### 9. Sheet `account.report` / `a.r` (Rename Laporan Keuangan)
 Menyesuaikan nama laporan resmi Odoo ke nomenklatur lembaga:
 - **Kolom**: `id`, `name`.
 - **Fungsi**: Mengubah nama laporan keuangan (`account.report`), judul window action (`ir.actions.client`), serta menu sidebar terkait (`ir.ui.menu`) di menu *Accounting → Reporting* (misal: `account_reports.balance_sheet` ➔ `Laporan Posisi Keuangan`, `account_reports.profit_and_loss` ➔ `Laporan Perubahan Dana`).
 
 ---
 
-### 10. Sheet `account.report.line` (Rename Baris/Hirarki Laporan)
+### 10. Sheet `account.report.line` / `a.r.l` (Rename Baris/Hirarki Laporan)
 Menyesuaikan nama baris laporan keuangan:
 - **Kolom**: `id`, `name`, `code` *(opsional)*.
 - **Fungsi**: Mengubah label/nama baris dan sub-grup hirarki laporan keuangan (`account.report.line`), misalnya mengubah baris `EQUITY (& EARNINGS)` menjadi `SALDO DANA`.
@@ -264,3 +282,4 @@ Menyesuaikan nama baris laporan keuangan:
 
 - `VALIDATE_IMPORTED_ASSETS` (default `False`): Set `True` jika ingin asset langsung tervalidasi setelah di-import.
 - `POST_OPENING_MOVES` (default `False`): Set `True` jika ingin opening move partner langsung ter-post.
+

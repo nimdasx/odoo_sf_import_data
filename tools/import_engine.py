@@ -20,6 +20,56 @@ _logger = logging.getLogger(__name__)
 # of which client module's data actually triggered the import.
 MODULE = os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+SHEET_ALIASES = {
+    "petunjuk": ("petunjuk", "p"),
+    "company": ("company", "c"),
+    "res.partner": ("res.partner", "r.p"),
+    "account.account": ("account.account", "a.a"),
+    "account.journal": ("account.journal", "a.j"),
+    "account.asset": ("account.asset", "a.as"),
+    "vendor_bill": ("vendor_bill", "v.b"),
+    "customer_invoice": ("customer_invoice", "c.i"),
+    "account.analytic.plan": ("account.analytic.plan", "a.an.p"),
+    "account.analytic.account": ("account.analytic.account", "a.an.a"),
+    "account.report": ("account.report", "a.r"),
+    "account.report.line": ("account.report.line", "a.r.l"),
+}
+
+
+def find_sheet(wb, canonical_or_alias):
+    """Cari nama sheet sesungguhnya yang ada pada workbook (wb.sheetnames).
+    Mendukung nama kanonikal, nama alias singkat (misal 'a.a' untuk 'account.account'),
+    serta toleransi case-insensitif dan penghapusan spasi.
+    """
+    if not wb or not hasattr(wb, "sheetnames"):
+        return None
+    sheetnames = wb.sheetnames
+    if canonical_or_alias in sheetnames:
+        return canonical_or_alias
+
+    candidates = [canonical_or_alias]
+    if canonical_or_alias in SHEET_ALIASES:
+        candidates.extend(SHEET_ALIASES[canonical_or_alias])
+    else:
+        for canon, aliases in SHEET_ALIASES.items():
+            if canonical_or_alias in aliases or canonical_or_alias == canon:
+                candidates.append(canon)
+                candidates.extend(aliases)
+                break
+
+    for cand in candidates:
+        if cand in sheetnames:
+            return cand
+
+    clean_map = {s.strip().lower(): s for s in sheetnames}
+    for cand in candidates:
+        cand_clean = cand.strip().lower()
+        if cand_clean in clean_map:
+            return clean_map[cand_clean]
+
+    return None
+
+
 JOURNAL_TYPES = {"Bank": "bank", "Kas": "cash", "Lain-lain": "general"}
 ASSET_METHODS = {"Garis Lurus": "linear"}
 ASSET_PERIODS = {"Bulan": "1", "Tahun": "12"}
@@ -199,13 +249,14 @@ def _read_opening_balance_date(wb):
     di-derive dari sini (+1 hari), bukan sebaliknya, karena inilah nilai
     yang paling natural diisi orang: tanggal per kapan saldo awal berlaku.
     """
-    for sheet in ("company", "petunjuk"):
-        if sheet not in wb.sheetnames:
+    for sheet_key in ("company", "c", "petunjuk", "p"):
+        actual_sheet = find_sheet(wb, sheet_key)
+        if not actual_sheet or actual_sheet not in wb.sheetnames:
             continue
-        for row in wb[sheet].iter_rows(values_only=True):
+        for row in wb[actual_sheet].iter_rows(values_only=True):
             if row and row[0] == "OPENING_BALANCE_DATE":
                 return _parse_sheet_date(row[1], "OPENING_BALANCE_DATE")
-    raise ValueError('"OPENING_BALANCE_DATE" tidak ditemukan di sheet "company" atau "petunjuk"')
+    raise ValueError('"OPENING_BALANCE_DATE" tidak ditemukan di sheet "company" (atau "c") atau "petunjuk" (atau "p")')
 
 
 class ImportLogger:
@@ -235,9 +286,10 @@ class ImportLogger:
 
 
 def _sheet_rows(wb, sheet, columns):
-    if sheet not in wb.sheetnames:
+    actual_sheet = find_sheet(wb, sheet)
+    if not actual_sheet or actual_sheet not in wb.sheetnames:
         return
-    rows = wb[sheet].iter_rows(values_only=True)
+    rows = wb[actual_sheet].iter_rows(values_only=True)
     try:
         header = next(rows)
     except StopIteration:
@@ -340,8 +392,16 @@ def _move_rows(wb, sheet, default_date):
     """Group an Odoo-import-style sheet (a header row per move, followed by
     blank-id continuation rows) into one dict per move with a "lines" list.
     """
-    rows = wb[sheet].iter_rows(values_only=True)
-    header = next(rows)
+    actual_sheet = find_sheet(wb, sheet)
+    if not actual_sheet or actual_sheet not in wb.sheetnames:
+        return
+    rows = wb[actual_sheet].iter_rows(values_only=True)
+    try:
+        header = next(rows)
+    except StopIteration:
+        return
+    if not header:
+        return
     idx = {col: header.index(col) for col in header}
 
     def get(row, col):
@@ -381,14 +441,17 @@ def _move_rows(wb, sheet, default_date):
 
 
 def _import_opening_move(env, wb, sheet, partner_rank_field, default_date, logger=None):
+    actual_sheet = find_sheet(wb, sheet)
+    if not actual_sheet:
+        return
     company = env.ref("base.main_company")
-    for move_data in _move_rows(wb, sheet, default_date):
+    for move_data in _move_rows(wb, actual_sheet, default_date):
         row_num = move_data.get("_row_number", 0)
         existing = env.ref(move_data["id"], raise_if_not_found=False)
         if existing and existing.state != "draft":
             if logger:
                 logger.log(
-                    sheet,
+                    actual_sheet,
                     row_num,
                     move_data.get("id", ""),
                     move_data.get("ref", ""),
@@ -435,19 +498,19 @@ def _import_opening_move(env, wb, sheet, partner_rank_field, default_date, logge
 
         if logger:
             logger.log(
-                sheet,
+                actual_sheet,
                 row_num,
                 move_data.get("id", ""),
                 move_data.get("ref", "") or move_data.get("id", ""),
                 "success",
-                f"Transaksi {sheet} [{move_data.get('ref')}] berhasil diimport ({len(move_data['lines'])} baris detail).",
+                f"Transaksi {actual_sheet} [{move_data.get('ref')}] berhasil diimport ({len(move_data['lines'])} baris detail).",
             )
     if logger:
         logger.flush()
 
 
 def _import_company(env, wb, logger=None):
-    """Read the "company" sheet - key/value rows (also where
+    """Read the "company" / "c" sheet - key/value rows (also where
     OPENING_BALANCE_DATE lives, see _read_opening_balance_date) - and write
     it onto the single company record, then apply any accounting feature
     toggles found there (see
@@ -455,10 +518,11 @@ def _import_company(env, wb, logger=None):
     field/toggle untouched rather than clearing it - so a partially-filled
     sheet (e.g. no logo URL yet) never blanks out data set another way.
     """
-    if "company" not in wb.sheetnames:
+    sheet = find_sheet(wb, "company")
+    if not sheet or sheet not in wb.sheetnames:
         return
     data = {}
-    for row in wb["company"].iter_rows(values_only=True):
+    for row in wb[sheet].iter_rows(values_only=True):
         if row and row[0]:
             data[row[0]] = row[1]
     if not data:
@@ -511,7 +575,7 @@ def _import_company(env, wb, logger=None):
 
     if logger:
         logger.log(
-            "company",
+            sheet,
             1,
             str(company.id),
             company.name,
@@ -543,8 +607,11 @@ def _apply_config_settings(env, company, company_values, settings_values):
 
 
 def _import_res_partner(env, wb, logger=None):
+    sheet = find_sheet(wb, "res.partner")
+    if not sheet:
+        return
     columns = ("id", "name", "email", "phone", "is_company", "street", "city", "state", "country_id", "ref")
-    for row in _sheet_rows(wb, "res.partner", columns):
+    for row in _sheet_rows(wb, sheet, columns):
         row_num = row.get("_row_number", 0)
         country = env["res.country"]
         if row["country_id"]:
@@ -567,7 +634,7 @@ def _import_res_partner(env, wb, logger=None):
         _get_or_create(env, "res.partner", partner_id, values)
         if logger:
             logger.log(
-                "res.partner",
+                sheet,
                 row_num,
                 str(row.get("ref") or row.get("id", "") or ""),
                 str(row.get("name", "")),
@@ -579,8 +646,11 @@ def _import_res_partner(env, wb, logger=None):
 
 
 def _import_account_analytic_plan(env, wb, logger=None):
+    sheet = find_sheet(wb, "account.analytic.plan")
+    if not sheet:
+        return
     columns = ("id", "name", "sequence", "default_applicability", "color", "description", "parent_id")
-    for row in _sheet_rows(wb, "account.analytic.plan", columns):
+    for row in _sheet_rows(wb, sheet, columns):
         row_num = row.get("_row_number", 0)
         values = {
             "name": row["name"],
@@ -606,7 +676,7 @@ def _import_account_analytic_plan(env, wb, logger=None):
         _get_or_create(env, "account.analytic.plan", row["id"], values)
         if logger:
             logger.log(
-                "account.analytic.plan",
+                sheet,
                 row_num,
                 str(row.get("id", "")),
                 str(row.get("name", "")),
@@ -618,8 +688,11 @@ def _import_account_analytic_plan(env, wb, logger=None):
 
 
 def _import_account_analytic_account(env, wb, logger=None):
+    sheet = find_sheet(wb, "account.analytic.account")
+    if not sheet:
+        return
     columns = ("id", "name", "plan_id", "code", "active", "partner_id")
-    for row in _sheet_rows(wb, "account.analytic.account", columns):
+    for row in _sheet_rows(wb, sheet, columns):
         row_num = row.get("_row_number", 0)
         plan = None
         if row["plan_id"]:
@@ -639,7 +712,7 @@ def _import_account_analytic_account(env, wb, logger=None):
             )
             if logger:
                 logger.log(
-                    "account.analytic.account",
+                    sheet,
                     row_num,
                     str(row.get("code") or row.get("id", "") or ""),
                     str(row.get("name", "")),
@@ -666,7 +739,7 @@ def _import_account_analytic_account(env, wb, logger=None):
         _get_or_create(env, "account.analytic.account", row["id"], values)
         if logger:
             logger.log(
-                "account.analytic.account",
+                sheet,
                 row_num,
                 str(row.get("code") or row.get("id", "") or ""),
                 str(row.get("name", "")),
@@ -678,10 +751,11 @@ def _import_account_analytic_account(env, wb, logger=None):
 
 
 def _import_account_report(env, wb, logger=None):
-    if "account.report" not in wb.sheetnames or "account.report" not in env:
+    sheet = find_sheet(wb, "account.report")
+    if not sheet or "account.report" not in env:
         return
     columns = ("id", "name")
-    for row in _sheet_rows(wb, "account.report", columns):
+    for row in _sheet_rows(wb, sheet, columns):
         row_num = row.get("_row_number", 0)
         if not row["name"]:
             continue
@@ -702,7 +776,7 @@ def _import_account_report(env, wb, logger=None):
             _logger.warning("Laporan accounting (account.report) %r tidak ditemukan - dilewati.", xml_id)
             if logger:
                 logger.log(
-                    "account.report",
+                    sheet,
                     row_num,
                     xml_id,
                     str(row.get("name", "")),
@@ -733,7 +807,7 @@ def _import_account_report(env, wb, logger=None):
 
         if logger:
             logger.log(
-                "account.report",
+                sheet,
                 row_num,
                 xml_id,
                 str(row.get("name", "")),
@@ -745,10 +819,11 @@ def _import_account_report(env, wb, logger=None):
 
 
 def _import_account_report_line(env, wb, logger=None):
-    if "account.report.line" not in wb.sheetnames or "account.report.line" not in env:
+    sheet = find_sheet(wb, "account.report.line")
+    if not sheet or "account.report.line" not in env:
         return
     columns = ("id", "name", "code")
-    for row in _sheet_rows(wb, "account.report.line", columns):
+    for row in _sheet_rows(wb, sheet, columns):
         row_num = row.get("_row_number", 0)
         if not row["name"]:
             continue
@@ -771,7 +846,7 @@ def _import_account_report_line(env, wb, logger=None):
             _logger.warning("Baris laporan (account.report.line) %r tidak ditemukan - dilewati.", xml_id)
             if logger:
                 logger.log(
-                    "account.report.line",
+                    sheet,
                     row_num,
                     str(row.get("code") or xml_id),
                     str(row.get("name", "")),
@@ -783,7 +858,7 @@ def _import_account_report_line(env, wb, logger=None):
         line.write({"name": row["name"]})
         if logger:
             logger.log(
-                "account.report.line",
+                sheet,
                 row_num,
                 str(row.get("code") or xml_id),
                 str(row.get("name", "")),
@@ -796,20 +871,16 @@ def _import_account_report_line(env, wb, logger=None):
 
 def _import_kas_bank(env, wb, default_date, logger=None):
     """Import kas/bank opening balances as account.bank.statement.line records.
-    Source:
-    1. Direct opening_balance column on sheet "account.journal" (preferred).
-    2. Legacy sheet "kas_bank" (fallback if sheet exists and has data).
+    Source: opening_balance column on sheet "account.journal" / "a.j".
     """
     company = env.ref("base.main_company")
     transfer_total = 0.0
 
-    # 1. Preferred source: read from sheet "account.journal" column "opening_balance"
-    journal_has_balance = False
-    if "account.journal" in wb.sheetnames:
+    journal_sheet = find_sheet(wb, "account.journal")
+    if journal_sheet:
         columns = ("id", "name", "type", "code", "opening_balance")
-        rows = list(_sheet_rows(wb, "account.journal", columns))
+        rows = list(_sheet_rows(wb, journal_sheet, columns))
         if any(r.get("opening_balance") not in (None, "") for r in rows):
-            journal_has_balance = True
 
             # Clean up all existing opening statement lines on default_date for bank/cash journals
             all_bank_cash = env["account.journal"].search([
@@ -864,7 +935,7 @@ def _import_kas_bank(env, wb, default_date, logger=None):
                 _get_or_create(env, "account.bank.statement.line", line_xml_id, values)
                 if logger:
                     logger.log(
-                        "account.journal (Saldo Awal)",
+                        f"{journal_sheet} (Saldo Awal)",
                         row.get("_row_number", 0),
                         journal.code,
                         journal.name,
@@ -874,58 +945,27 @@ def _import_kas_bank(env, wb, default_date, logger=None):
             if logger:
                 logger.flush()
 
-    # 2. Fallback source: legacy sheet "kas_bank"
-    if not journal_has_balance and "kas_bank" in wb.sheetnames:
-        for move_data in _move_rows(wb, "kas_bank", default_date):
-            journal = env["account.journal"].search([
-                ("name", "=", move_data["journal"]),
-                ("company_id", "=", company.id),
-            ], limit=1)
-            if not journal:
-                _logger.warning("Jurnal %r untuk kas_bank tidak ditemukan - dilewati.", move_data["journal"])
-                continue
-
-            amount = sum(
-                (line["debit"] or 0.0) - (line["credit"] or 0.0)
-                for line in move_data["lines"]
-                if _account_by_code_name(env, line["account"]) == journal.default_account_id
-            )
-            transfer_total += amount
-
-            existing = env.ref(move_data["id"], raise_if_not_found=False)
-            if existing:
-                if existing.is_reconciled:
-                    _logger.warning("Bank statement line %r sudah direkonsiliasi - dilewati.", move_data["id"])
-                    continue
-                existing.unlink()
-
-            values = {
-                "journal_id": journal.id,
-                "date": move_data["date"],
-                "payment_ref": move_data["ref"],
-                "amount": amount,
-                "counterpart_account_id": company.transfer_account_id.id,
-            }
-            _get_or_create(env, "account.bank.statement.line", move_data["id"], values)
-
     _write_opening_balances(env, {
         company.transfer_account_id: [max(transfer_total, 0.0), max(-transfer_total, 0.0)],
     })
 
 
 def _import_account_account(env, wb, logger=None):
+    sheet = find_sheet(wb, "account.account")
+    if not sheet:
+        return
     columns = ("id", "code", "name", "account_type", "opening_debit", "opening_credit", "active")
     opening_totals = {}
     company = env.ref("base.main_company")
     seen_codes = {}
 
-    for row in _sheet_rows(wb, "account.account", columns):
+    for row in _sheet_rows(wb, sheet, columns):
         row_num = row.get("_row_number", 0)
         code = str(row["code"]).strip() if row.get("code") is not None else ""
         name = str(row["name"]).strip() if row.get("name") is not None else ""
         if not code or not name:
             if logger:
-                logger.log("account.account", row_num, code, name, "skipped", "Dilewati: Kode akun atau nama akun kosong.")
+                logger.log(sheet, row_num, code, name, "skipped", "Dilewati: Kode akun atau nama akun kosong.")
             continue
 
         is_duplicate = False
@@ -934,7 +974,7 @@ def _import_account_account(env, wb, logger=None):
             prev_row = seen_codes[code]
             if logger:
                 logger.log(
-                    "account.account", row_num, code, name, "warning",
+                    sheet, row_num, code, name, "warning",
                     f"Peringatan: Kode akun '{code}' duplikat dari baris {prev_row}. Meng-update akun yang sudah ada.",
                 )
         else:
@@ -990,7 +1030,7 @@ def _import_account_account(env, wb, logger=None):
             opening_totals[account] = [row["opening_debit"] or 0.0, row["opening_credit"] or 0.0]
 
         if logger and not is_duplicate:
-            logger.log("account.account", row_num, code, name, "success", f"Akun [{code}] {name} berhasil diimport.")
+            logger.log(sheet, row_num, code, name, "success", f"Akun [{code}] {name} berhasil diimport.")
 
     _write_opening_balances(env, opening_totals)
     if logger:
@@ -998,15 +1038,18 @@ def _import_account_account(env, wb, logger=None):
 
 
 def _import_account_journal(env, wb, logger=None):
+    sheet = find_sheet(wb, "account.journal")
+    if not sheet:
+        return
     columns = ("id", "sequence", "name", "type", "code", "default_account_id", "Bank Feed")
     company = env.ref("base.main_company")
-    for row in _sheet_rows(wb, "account.journal", columns):
+    for row in _sheet_rows(wb, sheet, columns):
         row_num = row.get("_row_number", 0)
         code = str(row["code"]).strip() if row.get("code") is not None else ""
         name = str(row["name"]).strip() if row.get("name") is not None else ""
         if not code or not name:
             if logger:
-                logger.log("account.journal", row_num, code, name, "skipped", "Dilewati: Kode atau nama jurnal kosong.")
+                logger.log(sheet, row_num, code, name, "skipped", "Dilewati: Kode atau nama jurnal kosong.")
             continue
 
         values = {
@@ -1053,13 +1096,16 @@ def _import_account_journal(env, wb, logger=None):
 
         if logger:
             acc_info = f" (Akun: {account.code} {account.name})" if account else ""
-            logger.log("account.journal", row_num, code, name, "success", f"Jurnal [{code}] {name} berhasil disinkronkan{acc_info}.")
+            logger.log(sheet, row_num, code, name, "success", f"Jurnal [{code}] {name} berhasil disinkronkan{acc_info}.")
 
     if logger:
         logger.flush()
 
 
 def _import_account_asset(env, wb, balance_date, logger=None):
+    sheet = find_sheet(wb, "account.asset")
+    if not sheet:
+        return
     columns = (
         "id", "name", "acquisition_date", "original_value", "already_depreciated_amount_import",
         "account_asset_id", "account_depreciation_id", "account_depreciation_expense_id",
@@ -1073,7 +1119,7 @@ def _import_account_asset(env, wb, balance_date, logger=None):
             totals[0] += debit
             totals[1] += credit
 
-    for row in _sheet_rows(wb, "account.asset", columns):
+    for row in _sheet_rows(wb, sheet, columns):
         row_num = row.get("_row_number", 0)
         if not row.get("name"):
             continue
@@ -1082,7 +1128,7 @@ def _import_account_asset(env, wb, balance_date, logger=None):
         if not raw_period or raw_period not in ASSET_PERIODS:
             if logger:
                 logger.log(
-                    "account.asset",
+                    sheet,
                     row_num,
                     row.get("id", "") or f"Row {row_num}",
                     row.get("name", ""),
@@ -1095,7 +1141,7 @@ def _import_account_asset(env, wb, balance_date, logger=None):
         if not asset_account:
             if logger:
                 logger.log(
-                    "account.asset",
+                    sheet,
                     row_num,
                     row.get("id", "") or f"Row {row_num}",
                     row.get("name", ""),
@@ -1150,7 +1196,7 @@ def _import_account_asset(env, wb, balance_date, logger=None):
 
         if logger:
             logger.log(
-                "account.asset",
+                sheet,
                 row_num,
                 row.get("id", ""),
                 row.get("name", ""),
@@ -1248,8 +1294,9 @@ def _cleanup_previous_data(env, wb, company):
     # 3. Bersihkan jurnal custom lama yang TIDAK ADA di spreadsheet baru
     sheet_journal_codes = set()
     sheet_journal_names = set()
-    if "account.journal" in wb.sheetnames:
-        for r in _sheet_rows(wb, "account.journal", ("id", "code", "name")):
+    journal_sheet = find_sheet(wb, "account.journal")
+    if journal_sheet:
+        for r in _sheet_rows(wb, journal_sheet, ("id", "code", "name")):
             if r.get("code"):
                 sheet_journal_codes.add(str(r["code"]).strip())
             if r.get("name"):
@@ -1282,8 +1329,9 @@ def _cleanup_previous_data(env, wb, company):
 
     # 4. Bersihkan akun COA custom lama yang TIDAK ADA di spreadsheet baru
     sheet_account_codes = set()
-    if "account.account" in wb.sheetnames:
-        for r in _sheet_rows(wb, "account.account", ("code",)):
+    account_sheet = find_sheet(wb, "account.account")
+    if account_sheet:
+        for r in _sheet_rows(wb, account_sheet, ("code",)):
             if r.get("code"):
                 sheet_account_codes.add(str(r["code"]).strip())
 

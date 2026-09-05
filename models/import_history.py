@@ -9,7 +9,7 @@ from odoo import api, fields, models
 from odoo.exceptions import UserError
 from odoo.tools import html_escape
 
-from ..tools.import_engine import run_import
+from ..tools.import_engine import SHEET_ALIASES, run_import
 
 GOOGLE_SHEET_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
 
@@ -20,30 +20,19 @@ class SfImportHistory(models.Model):
     _inherit = ["mail.thread", "mail.activity.mixin"]
     _order = "date desc, id desc"
 
-    name = fields.Char(
-        string="Referensi",
-        required=True,
-        copy=False,
-        default="Draft Import",
+    name = fields.Char(string="Nomor Referensi", required=True, copy=False, readonly=True, default="Draft Import")
+    date = fields.Datetime(string="Tanggal Eksekusi", default=fields.Datetime.now, readonly=True, tracking=True)
+    user_id = fields.Many2one(
+        "res.users",
+        string="User Eksekutor",
+        default=lambda self: self.env.user,
+        readonly=True,
         tracking=True,
     )
     company_id = fields.Many2one(
         "res.company",
         string="Perusahaan",
         default=lambda self: self.env.company,
-        required=True,
-        tracking=True,
-    )
-    user_id = fields.Many2one(
-        "res.users",
-        string="Dijalankan Oleh",
-        default=lambda self: self.env.user,
-        required=True,
-        tracking=True,
-    )
-    date = fields.Datetime(
-        string="Waktu Eksekusi",
-        default=fields.Datetime.now,
         required=True,
         tracking=True,
     )
@@ -123,23 +112,41 @@ class SfImportHistory(models.Model):
 
     @api.depends("line_ids.sheet_name")
     def _compute_sheet_lines(self):
+        account_names = set(SHEET_ALIASES.get("account.account", ())) | {"account.account", "a.a"}
+        journal_names = set(SHEET_ALIASES.get("account.journal", ())) | {"account.journal", "a.j"}
+        asset_names = set(SHEET_ALIASES.get("account.asset", ())) | {"account.asset", "a.as"}
+        partner_names = set(SHEET_ALIASES.get("res.partner", ())) | {"res.partner", "r.p"}
+        move_names = (
+            set(SHEET_ALIASES.get("vendor_bill", ()))
+            | set(SHEET_ALIASES.get("customer_invoice", ()))
+            | {"vendor_bill", "customer_invoice", "account.move", "v.b", "c.i"}
+        )
+        report_analytic_names = (
+            set(SHEET_ALIASES.get("company", ()))
+            | set(SHEET_ALIASES.get("account.analytic.plan", ()))
+            | set(SHEET_ALIASES.get("account.analytic.account", ()))
+            | set(SHEET_ALIASES.get("account.report", ()))
+            | set(SHEET_ALIASES.get("account.report.line", ()))
+            | {"company", "c", "a.r", "a.r.l", "a.an.p", "a.an.a"}
+        )
+
         for rec in self:
-            rec.account_line_ids = rec.line_ids.filtered(lambda l: l.sheet_name == "account.account")
-            rec.journal_line_ids = rec.line_ids.filtered(lambda l: l.sheet_name == "account.journal")
+            rec.account_line_ids = rec.line_ids.filtered(lambda l: l.sheet_name in account_names)
+            rec.journal_line_ids = rec.line_ids.filtered(lambda l: l.sheet_name in journal_names)
             rec.kas_bank_line_ids = rec.line_ids.filtered(
-                lambda l: l.sheet_name in ("account.journal (Saldo Awal)", "kas_bank")
+                lambda l: "Saldo Awal" in (l.sheet_name or "")
             )
-            rec.asset_line_ids = rec.line_ids.filtered(lambda l: l.sheet_name == "account.asset")
-            rec.partner_line_ids = rec.line_ids.filtered(lambda l: l.sheet_name == "res.partner")
+            rec.asset_line_ids = rec.line_ids.filtered(lambda l: l.sheet_name in asset_names)
+            rec.partner_line_ids = rec.line_ids.filtered(lambda l: l.sheet_name in partner_names)
             rec.move_line_ids = rec.line_ids.filtered(
-                lambda l: l.sheet_name in ("vendor_bill", "customer_invoice", "account.move")
-                or "bill" in l.sheet_name.lower()
-                or "invoice" in l.sheet_name.lower()
+                lambda l: l.sheet_name in move_names
+                or "bill" in (l.sheet_name or "").lower()
+                or "invoice" in (l.sheet_name or "").lower()
             )
             rec.report_analytic_line_ids = rec.line_ids.filtered(
-                lambda l: "report" in l.sheet_name
-                or "analytic" in l.sheet_name
-                or l.sheet_name == "company"
+                lambda l: l.sheet_name in report_analytic_names
+                or "report" in (l.sheet_name or "").lower()
+                or "analytic" in (l.sheet_name or "").lower()
             )
 
     @api.model_create_multi
