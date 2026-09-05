@@ -27,6 +27,7 @@ SHEET_ALIASES = {
     "account.account": ("account.account", "a.a"),
     "account.journal": ("account.journal", "a.j"),
     "account.asset": ("account.asset", "a.as"),
+    "account.asset.model": ("account.asset.model", "a.a.m"),
     "vendor_bill": ("vendor_bill", "v.b"),
     "customer_invoice": ("customer_invoice", "c.i"),
     "account.analytic.plan": ("account.analytic.plan", "a.an.p"),
@@ -1102,6 +1103,80 @@ def _import_account_journal(env, wb, logger=None):
         logger.flush()
 
 
+def _import_account_asset_model(env, wb, logger=None):
+    sheet = find_sheet(wb, "account.asset.model")
+    if not sheet or "account.asset" not in env:
+        return
+    columns = (
+        "id", "name", "account_asset_id", "account_depreciation_id",
+        "account_depreciation_expense_id", "method", "method_number", "method_period", "Jurnal",
+    )
+    for row in _sheet_rows(wb, sheet, columns):
+        row_num = row.get("_row_number", 0)
+        if not row.get("name"):
+            continue
+
+        raw_period = row.get("method_period")
+        method_period = ASSET_PERIODS.get(raw_period, "1")
+        method = ASSET_METHODS.get(row.get("method"), "linear")
+        method_number = int(row.get("method_number") or 1)
+
+        asset_account = _account_by_code_name(env, row.get("account_asset_id"))
+        depreciation_account = _account_by_code_name(env, row.get("account_depreciation_id"))
+        dep_expense_account = _account_by_code_name(env, row.get("account_depreciation_expense_id"))
+
+        journal = env["account.journal"].search([("name", "=", row.get("Jurnal"))], limit=1)
+        if not journal:
+            journal = env["account.journal"].search([("type", "=", "general")], limit=1)
+
+        values = {
+            "name": row["name"],
+            "state": "model",
+            "account_asset_id": asset_account.id if asset_account else False,
+            "account_depreciation_id": depreciation_account.id if depreciation_account else False,
+            "account_depreciation_expense_id": dep_expense_account.id if dep_expense_account else False,
+            "method": method,
+            "method_number": method_number,
+            "method_period": method_period,
+            "journal_id": journal.id if journal else False,
+        }
+
+        model_id = row.get("id") or f"account_asset_model_{row['name'].lower().replace(' ', '_')}"
+        model = False
+        if row.get("id"):
+            model = env.ref(row["id"], raise_if_not_found=False)
+        if not model:
+            model = env["account.asset"].search([("name", "=", row["name"]), ("state", "=", "model")], limit=1)
+
+        if model:
+            model.write(values)
+            if row.get("id"):
+                if "." in row["id"]:
+                    module, xml_name = row["id"].split(".", 1)
+                else:
+                    module, xml_name = MODULE, row["id"]
+                data = env["ir.model.data"].search([("module", "=", module), ("name", "=", xml_name)])
+                if not data:
+                    env["ir.model.data"].create({"module": module, "name": xml_name, "model": "account.asset", "res_id": model.id, "noupdate": True})
+                else:
+                    data.write({"noupdate": True, "res_id": model.id})
+        else:
+            model = _get_or_create(env, "account.asset", model_id, values)
+
+        if logger:
+            logger.log(
+                sheet,
+                row_num,
+                row.get("id", ""),
+                row.get("name", ""),
+                "success",
+                f"Model Aset '{row['name']}' berhasil disinkronkan.",
+            )
+
+    if logger:
+        logger.flush()
+
+
 def _import_account_asset(env, wb, balance_date, logger=None):
     sheet = find_sheet(wb, "account.asset")
     if not sheet:
@@ -1251,7 +1326,7 @@ def _check_user_journal_entries(env, company):
             ("res_id", "=", m.id),
             ("module", "in", (MODULE, "__import__")),
         ], limit=1)
-        if imd and ("vendor_bill" in imd.name or "customer_invoice" in imd.name):
+        if imd:
             continue
 
         user_moves |= m
@@ -1423,6 +1498,7 @@ def run_import(env, wb, history=None):
     _import_res_partner(env, wb, logger=logger)
     _import_account_account(env, wb, logger=logger)
     _import_account_journal(env, wb, logger=logger)
+    _import_account_asset_model(env, wb, logger=logger)
     _import_account_asset(env, wb, balance_date, logger=logger)
     _import_kas_bank(env, wb, balance_date, logger=logger)
     _import_opening_move(env, wb, "vendor_bill", "supplier_rank", balance_date, logger=logger)

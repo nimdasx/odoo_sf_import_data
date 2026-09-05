@@ -114,7 +114,11 @@ class SfImportHistory(models.Model):
     def _compute_sheet_lines(self):
         account_names = set(SHEET_ALIASES.get("account.account", ())) | {"account.account", "a.a"}
         journal_names = set(SHEET_ALIASES.get("account.journal", ())) | {"account.journal", "a.j"}
-        asset_names = set(SHEET_ALIASES.get("account.asset", ())) | {"account.asset", "a.as"}
+        asset_names = (
+            set(SHEET_ALIASES.get("account.asset", ()))
+            | set(SHEET_ALIASES.get("account.asset.model", ()))
+            | {"account.asset", "a.as", "account.asset.model", "a.a.m"}
+        )
         partner_names = set(SHEET_ALIASES.get("res.partner", ())) | {"res.partner", "r.p"}
         move_names = (
             set(SHEET_ALIASES.get("vendor_bill", ()))

@@ -114,18 +114,20 @@ Modul ini mendukung **dual format**: format nama sheet singkat (Google Sheet tem
 | 2 | Kontak / Partner | `r.p` | `res.partner` | Opsional |
 | 3 | Chart of Accounts | `a.a` | `account.account` | **Wajib** |
 | 4 | Jurnal Akuntansi & Kas/Bank | `a.j` | `account.journal` | **Wajib** |
-| 5 | Aset Tetap & Depresiasi | `a.as` | `account.asset` | Opsional |
-| 6 | Saldo Awal Hutang (Vendor) | `v.b` | `vendor_bill` | Opsional |
-| 7 | Saldo Awal Piutang (Customer) | `c.i` | `customer_invoice` | Opsional |
-| 8 | Rencana Analitik | `a.an.p` | `account.analytic.plan` | Opsional |
-| 9 | Akun Analitik | `a.an.a` | `account.analytic.account` | Opsional |
-| 10 | Rename Laporan Keuangan | `a.r` | `account.report` | Opsional |
-| 11 | Rename Baris Laporan | `a.r.l` | `account.report.line` | Opsional |
+| 5 | Model Aset | `a.a.m` | `account.asset.model` | Opsional |
+| 6 | Aset Tetap & Depresiasi | `a.as` | `account.asset` | Opsional |
+| 7 | Saldo Awal Hutang (Vendor) | `v.b` | `vendor_bill` | Opsional |
+| 8 | Saldo Awal Piutang (Customer) | `c.i` | `customer_invoice` | Opsional |
+| 9 | Rencana Analitik | `a.an.p` | `account.analytic.plan` | Opsional |
+| 10 | Akun Analitik | `a.an.a` | `account.analytic.account` | Opsional |
+| 11 | Rename Laporan Keuangan | `a.r` | `account.report` | Opsional |
+| 12 | Rename Baris Laporan | `a.r.l` | `account.report.line` | Opsional |
 | — | Petunjuk (Informasi) | `p` | `petunjuk` | Informasi |
+| — | Referensi Wilayah & Tipe Akun | `r.c.s`, `a.a.at`, `i.m.f.s` | — | Lookup / Data Validation |
 
 
 Urutan eksekusi import otomatis dijalankan secara sekuensial:
-`c` (`company`) → `r.p` (`res.partner`) → `a.a` (`account.account`) → `a.j` (`account.journal`) → `a.as` (`account.asset`) → `v.b` (`vendor_bill`) → `c.i` (`customer_invoice`) → `a.an.p` (`account.analytic.plan`) → `a.an.a` (`account.analytic.account`) → `a.r` (`account.report`) → `a.r.l` (`account.report.line`)
+`c` (`company`) → `r.p` (`res.partner`) → `a.a` (`account.account`) → `a.j` (`account.journal`) → `a.a.m` (`account.asset.model`) → `a.as` (`account.asset`) → `v.b` (`vendor_bill`) → `c.i` (`customer_invoice`) → `a.an.p` (`account.analytic.plan`) → `a.an.a` (`account.analytic.account`) → `a.r` (`account.report`) → `a.r.l` (`account.report.line`)
 
 ---
 
@@ -201,7 +203,14 @@ Buku jurnal operasional Odoo serta penentuan saldo awal kas & rekening bank:
 
 ---
 
-### 5. Sheet `account.asset` / `a.as` (Aset Tetap & Depresiasi)
+### 5. Sheet `account.asset.model` / `a.a.m` (Model Aset)
+Template model depresiasi aset untuk memudahkan pembuatan aset baru dengan pengaturan akun dan durasi standar:
+- **Kolom**: `id`, `name`, `account_asset_id`, `account_depreciation_id`, `account_depreciation_expense_id`, `method`, `method_number`, `method_period`, `Jurnal`.
+- Disimpan langsung pada model `account.asset` dengan status `state = 'model'` (standar Odoo 19 Enterprise).
+
+---
+
+### 6. Sheet `account.asset` / `a.as` (Aset Tetap & Depresiasi)
 Master aset tetap untuk manajemen depresiasi otomatis Odoo Enterprise:
 - **Kolom**: `id`, `name`, `original_value`, `acquisition_date`, `model_id`, `already_depreciated_amount_import` *(opsional)*.
 - **Opening Balance Otomatis**: Total `original_value` dan akumulasi depresiasi otomatis mengisi debit/kredit akun terkait pada opening move.
