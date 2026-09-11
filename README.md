@@ -2,7 +2,7 @@
 
 Modul shared untuk import Chart of Accounts (CoA), kontak partner, jurnal akuntansi, saldo awal kas & bank, aset tetap & depresiasi, saldo awal hutang & piutang, struktur analitik, serta penyesuaian nomenklatur laporan keuangan dari satu file Excel atau Google Sheets.
 
-- **Versi**: `19.0.1.1.0`
+- **Versi**: `19.0.1.2.0`
 - **Dependencies**: `accountant`, `mail` (Odoo Enterprise), Python: `openpyxl`, `requests`
 - **Fitur Bawaan**: Relabel `account_type` ke Bahasa Indonesia secara otomatis (`data/ir.model.fields.selection.csv`).
 - **Template Google Sheet**: [Template Import Data Master (Google Sheets)](https://docs.google.com/spreadsheets/d/1Hs-XjWxnb8qFXmuTXrZHzpJnQw4aXy_LuqDtuFQzAGY/edit?usp=sharing)
@@ -13,7 +13,7 @@ Modul shared untuk import Chart of Accounts (CoA), kontak partner, jurnal akunta
 
 1. **Manajemen Riwayat Import (`sf.import.history`)**:
    - Setiap proses import tercatat otomatis dalam riwayat resmi (`IMP/YYYY/MM/XXXX`).
-   - Menyimpan tanggal eksekusi, user yang menjalankan, file `.xlsx` atau URL Google Sheet, dan status akhir (*Draft*, *Sedang Diproses*, *Selesai*, *Peringatan / Duplikat*, *Gagal*).
+   - Menyimpan tanggal eksekusi, user yang menjalankan, file `.xlsx` atau URL Google Sheet, dan status akhir (*Draft*, *Sedang Diproses*, *Selesai*, *Selesai (Ada Peringatan / Duplikat)*, *Gagal*).
    - Dilengkapi kartu ringkasan visual (*summary card*) yang menampilkan statistik jumlah baris sukses, peringatan, skip, dan error.
 
 2. **Logging Rinci per Record (`sf.import.history.line`)**:
@@ -61,6 +61,9 @@ Buka menu **Accounting / Invoicing → Configuration → Import Data Master** (a
 2. Pilih sumber data: **Google Sheets URL** (pastikan akses publik *Anyone with the link*) atau **Upload File (.xlsx)**.
 3. Klik tombol **Jalankan Import**.
 4. Sistem akan memproses seluruh sheet, menampilkan status progress, summary card, serta membagi hasil log ke tab-tab per sheet.
+
+> [!NOTE]
+> Alur ini berjalan langsung di atas form `sf.import.history` (bukan wizard terpisah). Folder `wizard/` (model `sf.import.data.wizard`) masih ada di source tapi *action*-nya belum ditautkan ke menu manapun sehingga tidak dapat diakses dari UI saat ini.
 
 ### 2. Bundled di Modul Client (Otomatis saat Install Modul)
 Taruh file `.xlsx` master data di folder `data/` modul client, lalu panggil pada `post_init_hook`:
@@ -136,7 +139,8 @@ Menyimpan konfigurasi umum perusahaan dalam format pasangan kunci-nilai (Kolom A
 - **`OPENING_BALANCE_DATE`** *(Wajib)*: Tanggal cutover saldo awal (mis. `2026-06-30`). Tahun buku Odoo (`account_opening_date`) otomatis menjadi `H+1` (`2026-07-01`).
 - **`logo`**: URL gambar logo (otomatis di-download & di-encode ke base64).
 - **`analytic_accounting`** & **`budget_management`**: Toggle fitur accounting (`TRUE`/`FALSE`).
-- Profil perusahaan: `name`, `street`, `street2`, `city`, `zip`, `phone`, `email`, `website`, `report_footer`.
+- Profil perusahaan: `name`, `street`, `street2`, `city`, `zip`, `country`, `state`, `phone`, `email`, `website`, `report_footer`.
+- **`external_report_layout`**: XML ID template layout laporan/dokumen (opsional, default ke layout standar bawaan jika kosong).
 
 ---
 
@@ -194,11 +198,11 @@ Bagan akun (COA) beserta nilai saldo awal neraca:
 ### 4. Sheet `account.journal` / `a.j` & Saldo Awal Kas/Bank
 Buku jurnal operasional Odoo serta penentuan saldo awal kas & rekening bank:
 - **Kolom**: `id`, `sequence`, `name`, `type`, `code`, `default_account_id`, `Bank Feed`, **`opening_balance`** *(opsional)*.
-- **`type`**: `Bank`, `Kas`, `Penjualan`, `Pembelian`, atau `Lain-lain`.
+- **`type`**: `Bank`, `Kas`, atau `Lain-lain` (persis 3 nilai ini — baris dengan nilai lain akan dilewati (*skipped*) dan dicatat di log, jurnal tersebut tidak akan dibuat/diupdate).
 - **`opening_balance`**: Saldo awal rekening bank/kas (angka positif untuk saldo normal debit, angka negatif untuk cerukan/overdraft kredit).
   - Sistem otomatis membuat record transaksi mutasi (*Bank Statement Line*) yang ter-posting langsung di dashboard jurnal terkait.
   - Akun lawan otomatis diarahkan ke akun **Liquidity Transfer** penyeimbang.
-  - Rekening kas/bank yang bernilai 0 / kosong tidak akan dibuatkan baris transaksi dummy.
+  - Baris hanya dilewati jika sel `opening_balance` benar-benar kosong; isi `0` tetap akan membuat baris transaksi (dengan nominal nol).
 
 
 ---
@@ -212,7 +216,8 @@ Template model depresiasi aset untuk memudahkan pembuatan aset baru dengan penga
 
 ### 6. Sheet `account.asset` / `a.as` (Aset Tetap & Depresiasi)
 Master aset tetap untuk manajemen depresiasi otomatis Odoo Enterprise:
-- **Kolom**: `id`, `name`, `original_value`, `acquisition_date`, `model_id`, `already_depreciated_amount_import` *(opsional)*.
+- **Kolom**: `id`, `name`, `acquisition_date`, `original_value`, `already_depreciated_amount_import` *(opsional)*, `account_asset_id`, `account_depreciation_id`, `account_depreciation_expense_id`, `method`, `method_number`, `method_period`, `Jurnal`.
+- **Catatan**: Akun aset/depresiasi/beban, metode, dan periode diisi **langsung per baris aset** (kolom sama seperti sheet `account.asset.model`), bukan melalui referensi `model_id` ke sheet `a.a.m`. Sheet `a.a.m` hanya membuat record template model aset di Odoo untuk dipakai manual di UI; tidak otomatis di-link ke baris `a.as`.
 - **Opening Balance Otomatis**: Total `original_value` dan akumulasi depresiasi otomatis mengisi debit/kredit akun terkait pada opening move.
 - **`already_depreciated_amount_import`**: Jika kosong, otomatis dihitung dari `acquisition_date` hingga `OPENING_BALANCE_DATE`. Isi manual hanya untuk override kalkulasi.
 - **Beban Penyusutan 1 Tahun Terakhir (Otomatis)**: Selain akumulasi penyusutan, sistem juga otomatis menghitung *debit* ke akun `account_depreciation_expense_id` sebesar beban penyusutan 12 bulan terakhir sebelum `OPENING_BALANCE_DATE` (akumulasi per `OPENING_BALANCE_DATE` dikurangi akumulasi per 12 bulan sebelumnya, prorata sama seperti di bawah) — supaya Laporan Laba Rugi "Tahun Lalu" tetap menunjukkan beban penyusutan tanpa perlu diisi manual. **Kosongkan** `opening_debit` akun beban penyusutan terkait di sheet `a.a` bila memakai fitur ini (lihat peringatan *overwrite* di atas).
@@ -249,6 +254,7 @@ Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari:
 >   )
 > )
 > ```
+> Catatan: formula di atas berlaku untuk `method_period` = **Bulan**. Untuk `method_period` = **Tahun**, hasil `Periode Berlalu` (dalam satuan bulan) dibagi lagi dengan `12` sebelum dikalikan ke `(original_value / method_number)`.
 
 ---
 

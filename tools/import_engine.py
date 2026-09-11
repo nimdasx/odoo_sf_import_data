@@ -1067,10 +1067,20 @@ def _import_account_journal(env, wb, logger=None):
                 logger.log(sheet, row_num, code, name, "skipped", "Dilewati: Kode atau nama jurnal kosong.")
             continue
 
+        journal_type = JOURNAL_TYPES.get(row.get("type"))
+        if not journal_type:
+            if logger:
+                logger.log(
+                    sheet, row_num, code, name, "skipped",
+                    f"Dilewati: kolom type ({row.get('type')}) tidak dikenali. "
+                    f"Nilai valid: {', '.join(JOURNAL_TYPES)}.",
+                )
+            continue
+
         values = {
             "sequence": row["sequence"],
             "name": row["name"],
-            "type": JOURNAL_TYPES[row["type"]],
+            "type": journal_type,
             "code": row["code"],
             "bank_statements_source": row["Bank Feed"],
         }
