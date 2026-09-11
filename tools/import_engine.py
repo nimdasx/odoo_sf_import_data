@@ -7,6 +7,7 @@ import time
 from datetime import date, datetime, timedelta
 
 import requests
+from dateutil.relativedelta import relativedelta
 from openpyxl import load_workbook
 from psycopg2.errors import SerializationFailure
 
@@ -361,6 +362,19 @@ def _elapsed_depreciation_periods(acquisition_date, balance_date, method_period)
     if method_period == "12":  # yearly
         return max(0.0, elapsed_months / 12.0)
     return max(0.0, elapsed_months)
+
+
+def _accumulated_depreciation(original_value, acquisition_date, asof_date, method_number, method_period):
+    """Akumulasi penyusutan (metode constant_periods Odoo 19) dari acquisition_date
+    sampai asof_date - dipakai baik untuk already_depreciated_amount_import (asof_date
+    = balance_date) maupun untuk menghitung beban penyusutan 1 tahun terakhir
+    (selisih akumulasi di balance_date dan di balance_date - 12 bulan).
+    """
+    if not method_number:
+        return 0.0
+    elapsed = _elapsed_depreciation_periods(acquisition_date, asof_date, method_period)
+    elapsed = min(elapsed, method_number)
+    return original_value / method_number * elapsed
 
 
 def _write_opening_balances(env, totals):
@@ -1240,9 +1254,18 @@ def _import_account_asset(env, wb, balance_date, logger=None):
 
         already_depreciated = row.get("already_depreciated_amount_import")
         if already_depreciated in (None, ""):
-            elapsed = _elapsed_depreciation_periods(acquisition_date, balance_date, method_period)
-            elapsed = min(elapsed, method_number)
-            already_depreciated = original_value / method_number * elapsed if method_number else 0.0
+            already_depreciated = _accumulated_depreciation(
+                original_value, acquisition_date, balance_date, method_number, method_period
+            )
+
+        # Beban penyusutan 1 tahun terakhir = akumulasi per balance_date dikurangi
+        # akumulasi per 12 bulan sebelumnya - dipakai supaya Laporan Laba Rugi
+        # "Tahun Lalu" tetap menunjukkan beban penyusutan tanpa harus diisi manual
+        # di sheet a.a (lihat juga catatan "Aturan Akun Khusus" di README).
+        depreciation_expense_1y = already_depreciated - _accumulated_depreciation(
+            original_value, acquisition_date, balance_date - relativedelta(months=12), method_number, method_period
+        )
+        depreciation_expense_1y = max(depreciation_expense_1y, 0.0)
 
         values = {
             "name": row["name"],
@@ -1268,6 +1291,8 @@ def _import_account_asset(env, wb, balance_date, logger=None):
         _add_opening(asset_account, debit=original_value)
         if depreciation_account:
             _add_opening(depreciation_account, credit=already_depreciated)
+        if dep_expense_account:
+            _add_opening(dep_expense_account, debit=depreciation_expense_1y)
 
         if logger:
             logger.log(

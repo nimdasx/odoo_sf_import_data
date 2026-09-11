@@ -157,14 +157,14 @@ Bagan akun (COA) beserta nilai saldo awal neraca:
 > [!IMPORTANT]
 > **Aturan Akun Khusus (Jangan Diisi di Sheet Ini):**
 > - **Kas & Bank**: Kosongkan `opening_debit`/`opening_credit` di sheet ini. Saldo kas/bank diisi via kolom `opening_balance` di sheet `account.journal` / `a.j`.
-> - **Aset Tetap & Akumulasi Penyusutan**: Kosongkan jika menggunakan sheet `account.asset` / `a.as` agar nilai tidak tercatat ganda.
+> - **Aset Tetap, Akumulasi Penyusutan, & Beban Penyusutan**: Kosongkan ketiganya jika menggunakan sheet `account.asset` / `a.as` agar nilai tidak tercatat ganda. **PENTING**: penulisan `opening_debit`/`opening_credit` bersifat *overwrite* per akun, bukan akumulasi — kalau akun yang sama diisi manual di sini **dan** dihitung otomatis dari `a.as`, nilai dari `a.as` akan menimpa (menghilangkan) nilai manual ini karena sheet `a.as` diproses setelah sheet ini.
 > - **Liquidity Transfer**: Dihitung otomatis dari akumulasi saldo kas/bank.
 > - **Laba Ditahan / Penyeimbang**: Dihitung otomatis oleh Odoo untuk menyeimbangkan total Debit dan Kredit.
 
 #### Panduan Posisi Saldo Normal (Debit / Kredit) per `account_type`
 
 | Kategori | Tipe Akun (Bahasa Indonesia) | Technical Type (`account_type`) | Posisi Saldo Normal | Keterangan & Catatan Khusus |
-| :--- | :--- | :--- | :--- | :---: | :--- |
+| :--- | :--- | :--- | :---: | :--- |
 | **Aset** | Bank dan Tunai | `asset_cash` | **DEBIT** | Kosongkan di sheet ini, diisi via `opening_balance` di sheet `account.journal` / `a.j`. |
 | **Aset** | Piutang | `asset_receivable` | **DEBIT** | Disarankan lewat sheet `customer_invoice` / `c.i` agar ada rincian per partner. |
 | **Aset** | Cadangan Piutang Tak Tertagih *(Contra-Asset)* | `asset_receivable` / `asset_current` | **KREDIT** | Penyisihan piutang ragu-ragu. Masukkan di `opening_credit` (positif). |
@@ -215,6 +215,7 @@ Master aset tetap untuk manajemen depresiasi otomatis Odoo Enterprise:
 - **Kolom**: `id`, `name`, `original_value`, `acquisition_date`, `model_id`, `already_depreciated_amount_import` *(opsional)*.
 - **Opening Balance Otomatis**: Total `original_value` dan akumulasi depresiasi otomatis mengisi debit/kredit akun terkait pada opening move.
 - **`already_depreciated_amount_import`**: Jika kosong, otomatis dihitung dari `acquisition_date` hingga `OPENING_BALANCE_DATE`. Isi manual hanya untuk override kalkulasi.
+- **Beban Penyusutan 1 Tahun Terakhir (Otomatis)**: Selain akumulasi penyusutan, sistem juga otomatis menghitung *debit* ke akun `account_depreciation_expense_id` sebesar beban penyusutan 12 bulan terakhir sebelum `OPENING_BALANCE_DATE` (akumulasi per `OPENING_BALANCE_DATE` dikurangi akumulasi per 12 bulan sebelumnya, prorata sama seperti di bawah) — supaya Laporan Laba Rugi "Tahun Lalu" tetap menunjukkan beban penyusutan tanpa perlu diisi manual. **Kosongkan** `opening_debit` akun beban penyusutan terkait di sheet `a.a` bila memakai fitur ini (lihat peringatan *overwrite* di atas).
 
 #### Rumus & Logika Perhitungan Akumulasi Penyusutan (Prorata Odoo 19)
 Kalkulasi otomatis (*fallback*) menggunakan metode **Garis Lurus (*Straight Line*)** dengan standar Odoo 19 Enterprise berbasis **Prorata Temporis (*Constant Periods*)**:
