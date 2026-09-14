@@ -212,7 +212,8 @@ def import_bundled_data(env, module_dir):
         _logger.warning("No .xlsx master data file found under %s - skipping data import.", data_dir)
         return
     wb = load_workbook(path, read_only=True, data_only=True)
-    run_import(env, wb)
+    wb_formulas = load_workbook(path, read_only=True, data_only=False)
+    run_import(env, wb, wb_formulas=wb_formulas)
 
 
 _DATE_STRING_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y")
@@ -285,6 +286,40 @@ class ImportLogger:
         if self.history and self.pending_lines:
             self.history.env["sf.import.history.line"].create(self.pending_lines)
             self.pending_lines = []
+
+
+def _warn_uncomputed_formulas(wb_formulas, wb_values, logger=None):
+    """data_only=True (dipakai di run_import) hanya bisa membaca *cached value*
+    terakhir dari sel formula, bukan rumusnya - itu cukup untuk file yang
+    sudah pernah dihitung ulang oleh Excel/Google Sheets (kasus normal, lihat
+    _download_google_sheet yang selalu export dalam kondisi ter-kalkulasi).
+    Tapi kalau file .xlsx dibuat/diedit oleh tool lain yang menulis string
+    rumus tanpa pernah menghitungnya, cache-nya kosong dan openpyxl
+    mengembalikan None - baris/kolom itu akan diam-diam diperlakukan sebagai
+    blank oleh importer. Fungsi ini membandingkan workbook rumus
+    (data_only=False) dengan workbook nilai (data_only=True) untuk
+    mendeteksi kasus itu secara eksplisit dan mencatatnya sebagai warning,
+    alih-alih membiarkannya lolos sebagai data kosong tanpa jejak.
+    """
+    for sheet_name in wb_formulas.sheetnames:
+        if sheet_name not in wb_values.sheetnames:
+            continue
+        ws_formulas = wb_formulas[sheet_name]
+        ws_values = wb_values[sheet_name]
+        for row_formulas, row_values in zip(ws_formulas.iter_rows(), ws_values.iter_rows()):
+            for cell_formula, cell_value in zip(row_formulas, row_values):
+                if cell_formula.data_type == "f" and cell_value.value is None:
+                    message = (
+                        f'Sel {cell_formula.coordinate} pada sheet "{sheet_name}" berisi rumus '
+                        f"({cell_formula.value}) yang belum pernah dihitung (cached value kosong) - "
+                        "dibaca sebagai kosong oleh importer. Buka & simpan ulang file-nya di "
+                        "Excel/Google Sheets supaya nilainya ikut ter-hitung sebelum diimport."
+                    )
+                    _logger.warning(message)
+                    if logger:
+                        logger.log(sheet_name, cell_formula.row, cell_formula.coordinate, "", "warning", message)
+    if logger:
+        logger.flush()
 
 
 def _sheet_rows(wb, sheet, columns):
@@ -1483,13 +1518,21 @@ def _cleanup_previous_data(env, wb, company):
             acc.active = False
 
 
-def run_import(env, wb, history=None):
+def run_import(env, wb, history=None, wb_formulas=None):
     """Run the full master-data import against an already-open workbook.
     Shared entry point for import_bundled_data() (a client module's
     post_init_hook), sf.import.history, and the Settings > Import Data Master wizard.
+
+    wb_formulas: opsional, workbook yang sama tapi dibuka dengan
+    data_only=False - kalau diberikan, dipakai untuk mendeteksi sel formula
+    yang cache-nya kosong (lihat _warn_uncomputed_formulas) sebelum import
+    berjalan.
     """
     company = env.ref("base.main_company")
     logger = ImportLogger(history)
+
+    if wb_formulas is not None:
+        _warn_uncomputed_formulas(wb_formulas, wb, logger=logger)
 
     # Validasi: Jika sudah ada transaksi/journal entry operasional yang diinput user, tolak import
     user_moves = _check_user_journal_entries(env, company)

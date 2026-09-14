@@ -175,6 +175,7 @@ class SfImportHistory(models.Model):
 
         try:
             wb = load_workbook(io.BytesIO(content), data_only=True)
+            wb_formulas = load_workbook(io.BytesIO(content), data_only=False)
         except Exception as e:
             raise UserError(f"File yang diimport bukan file Excel (.xlsx) yang valid: {e}") from e
 
@@ -199,7 +200,7 @@ class SfImportHistory(models.Model):
         )
 
         try:
-            run_import(self.env, wb, history=self)
+            run_import(self.env, wb, history=self, wb_formulas=wb_formulas)
         except Exception as e:
             self.write({
                 "state": "failed",
