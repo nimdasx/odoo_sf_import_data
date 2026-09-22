@@ -262,6 +262,79 @@ def _read_opening_balance_date(wb):
     raise ValueError('"OPENING_BALANCE_DATE" tidak ditemukan di sheet "company" (atau "c") atau "petunjuk" (atau "p")')
 
 
+def _read_decimal_accuracy_percentage_analytic(wb):
+    """Baca DECIMAL_ACCURACY_PERCENTAGE_ANALYTIC (opsional) dari sheet "company"
+    (atau "c") - jumlah digit desimal yang dipakai widget alokasi analytic
+    (field analytic_distribution, model decimal.precision "Percentage
+    Analytic"). Beda project/klien bisa butuh presisi berbeda (atau tidak
+    butuh sama sekali - default Odoo 2 digit sudah cukup untuk banyak kasus),
+    makanya ini opsional dan dikontrol lewat sheet, bukan di-hardcode di
+    modul - modul ini dipakai lintas project, bukan cuma satu klien.
+    Return None kalau baris ini tidak ada di sheet manapun (tidak seperti
+    _read_opening_balance_date, TIDAK raise - ini murni opsional).
+    """
+    for sheet_key in ("company", "c", "petunjuk", "p"):
+        actual_sheet = find_sheet(wb, sheet_key)
+        if not actual_sheet or actual_sheet not in wb.sheetnames:
+            continue
+        for row in wb[actual_sheet].iter_rows(values_only=True):
+            if row and row[0] == "DECIMAL_ACCURACY_PERCENTAGE_ANALYTIC":
+                return row[1]
+    return None
+
+
+def _apply_analytic_percentage_precision(env, digits, logger=None):
+    """Naikkan presisi 'Percentage Analytic' (decimal.precision) sesuai
+    DECIMAL_ACCURACY_PERCENTAGE_ANALYTIC di sheet, kalau diisi. Presisi 2
+    digit (default Odoo) bisa bikin alokasi analytic dalam persen meleset
+    ratusan rupiah dari nominal yang dimaksud (mis. 44.14% dari 9.062.900
+    -> 4.000.364,06, padahal maunya tepat 4.000.000) karena rasio nominal
+    yang diinginkan sering tidak "bulat" di 2 desimal.
+
+    Sengaja TIDAK PERNAH menurunkan presisi yang sudah ada di database -
+    record lain (project lain, atau import sebelumnya) mungkin sudah
+    mengandalkan presisi yang lebih tinggi.
+    """
+    if digits in (None, ""):
+        return
+
+    try:
+        digits = int(digits)
+    except (TypeError, ValueError):
+        msg = (
+            f"DECIMAL_ACCURACY_PERCENTAGE_ANALYTIC harus berupa angka bulat, "
+            f"ditemukan {digits!r} - diabaikan."
+        )
+        _logger.warning(msg)
+        if logger:
+            logger.log("company", 0, "DECIMAL_ACCURACY_PERCENTAGE_ANALYTIC", "", "warning", msg)
+        return
+
+    if not (0 <= digits <= 12):
+        msg = (
+            f"DECIMAL_ACCURACY_PERCENTAGE_ANALYTIC di luar rentang wajar (0-12): "
+            f"{digits} - diabaikan."
+        )
+        _logger.warning(msg)
+        if logger:
+            logger.log("company", 0, "DECIMAL_ACCURACY_PERCENTAGE_ANALYTIC", "", "warning", msg)
+        return
+
+    precision = env["decimal.precision"].search([("name", "=", "Percentage Analytic")], limit=1)
+    if not precision:
+        return
+
+    old_digits = precision.digits
+    if digits <= old_digits:
+        return
+
+    precision.write({"digits": digits})
+    msg = f"Presisi 'Percentage Analytic' dinaikkan dari {old_digits} ke {digits} digit."
+    _logger.info(msg)
+    if logger:
+        logger.log("company", 0, "DECIMAL_ACCURACY_PERCENTAGE_ANALYTIC", "", "success", msg)
+
+
 class ImportLogger:
     def __init__(self, history):
         self.history = history
@@ -1571,6 +1644,9 @@ def run_import(env, wb, history=None, wb_formulas=None):
         company.account_opening_move_id.button_draft()
     if company.account_opening_move_id and company.account_opening_move_id.state == "draft":
         company.account_opening_move_id.date = balance_date
+
+    analytic_percentage_digits = _read_decimal_accuracy_percentage_analytic(wb)
+    _apply_analytic_percentage_precision(env, analytic_percentage_digits, logger=logger)
 
     _import_company(env, wb, logger=logger)
     _import_res_partner(env, wb, logger=logger)

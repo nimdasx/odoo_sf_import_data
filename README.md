@@ -137,6 +137,7 @@ Urutan eksekusi import otomatis dijalankan secara sekuensial:
 ### 1. Sheet `company` / `c` (Key-Value)
 Menyimpan konfigurasi umum perusahaan dalam format pasangan kunci-nilai (Kolom A: Key, Kolom B: Value):
 - **`OPENING_BALANCE_DATE`** *(Wajib)*: Tanggal cutover saldo awal (mis. `2026-06-30`). Tahun buku Odoo (`account_opening_date`) otomatis menjadi `H+1` (`2026-07-01`).
+- **`DECIMAL_ACCURACY_PERCENTAGE_ANALYTIC`** *(Opsional)*: Jumlah digit desimal untuk presisi alokasi analytic (`decimal.precision` "Percentage Analytic", dipakai widget alokasi analytic di journal item). Default Odoo cuma 2 digit, yang bisa bikin alokasi persen meleset ratusan rupiah dari nominal yang dimaksud kalau rasionya tidak "bulat" di 2 desimal (mis. `44.14%` dari `9.062.900` menghasilkan `4.000.364,06`, padahal maunya tepat `4.000.000` - lihat 5-6 digit biasanya sudah cukup presisi). Kosongkan kalau tidak perlu - modul ini dipakai lintas project, jadi nilainya tidak di-hardcode di kode, dan kalau diisi **tidak pernah menurunkan** presisi yang sudah ada di database (hanya menaikkan).
 - **`logo`**: URL gambar logo (otomatis di-download & di-encode ke base64).
 - **`analytic_accounting`** & **`budget_management`**: Toggle fitur accounting (`TRUE`/`FALSE`).
 - Profil perusahaan: `name`, `street`, `street2`, `city`, `zip`, `country`, `state`, `phone`, `email`, `website`, `report_footer`.
