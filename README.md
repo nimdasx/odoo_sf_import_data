@@ -248,13 +248,16 @@ Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari:
 >   MIN(
 >     original_value,
 >     (original_value / method_number) * (
->       DATEDIF(EOMONTH(acquisition_date, 0), EOMONTH(balance_date, 0), "M") +
->       (EOMONTH(acquisition_date, 0) - acquisition_date + 1) / DAY(EOMONTH(acquisition_date, 0))
+>       (EOMONTH(acquisition_date, 0) - acquisition_date + 1) / DAY(EOMONTH(acquisition_date, 0)) +
+>       (YEAR(balance_date) - YEAR(acquisition_date)) * 12 + (MONTH(balance_date) - MONTH(acquisition_date) - 1) +
+>       DAY(balance_date) / DAY(EOMONTH(balance_date, 0))
 >     )
 >   )
 > )
 > ```
 > Catatan: formula di atas berlaku untuk `method_period` = **Bulan**. Untuk `method_period` = **Tahun**, hasil `Periode Berlalu` (dalam satuan bulan) dibagi lagi dengan `12` sebelum dikalikan ke `(original_value / method_number)`.
+>
+> **Jangan pakai `DATEDIF(EOMONTH(acquisition_date,0), EOMONTH(balance_date,0), "M")`** untuk menghitung "Bulan Penuh" di atas — `DATEDIF` bisa salah hitung 1 bulan ketika kedua tanggal akhir-bulan itu berada di bulan dengan jumlah hari berbeda (mis. akhir Oktober/31 hari vs akhir Juni/30 hari). Versi sebelumnya di README ini memakai `DATEDIF` dan sekaligus lupa menambahkan Prorata Akhir (langkah 3 di atas) — kombinasi keduanya membuat hasilnya kurang tepat 1 bulan penyusutan dibanding kalkulasi Odoo.
 
 ---
 
