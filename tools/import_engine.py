@@ -733,7 +733,10 @@ def _import_res_partner(env, wb, logger=None):
     sheet = find_sheet(wb, "res.partner")
     if not sheet:
         return
-    columns = ("id", "name", "email", "phone", "is_company", "street", "city", "state", "country_id", "ref")
+    columns = (
+        "id", "name", "email", "phone", "is_company", "street", "city", "state", "country_id", "ref",
+        "customer_rank", "supplier_rank",
+    )
     for row in _sheet_rows(wb, sheet, columns):
         row_num = row.get("_row_number", 0)
         country = env["res.country"]
@@ -753,6 +756,11 @@ def _import_res_partner(env, wb, logger=None):
             "country_id": country.id,
             "ref": row["ref"],
         }
+        # Only written when filled - a blank cell must not reset a rank Odoo
+        # already bumped from posted invoices/bills on re-import.
+        for rank_field in ("customer_rank", "supplier_rank"):
+            if row[rank_field] is not None:
+                values[rank_field] = int(row[rank_field])
         partner_id = row.get("id") or f"partner_{row['name']}"
         _get_or_create(env, "res.partner", partner_id, values)
         if logger:

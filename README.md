@@ -147,7 +147,8 @@ Menyimpan konfigurasi umum perusahaan dalam format pasangan kunci-nilai (Kolom A
 
 ### 2. Sheet `res.partner` / `r.p` (Kontak / Partner)
 Master data kontak pelanggan, pemasok, donatur, muzakki, amil, atau karyawan:
-- **Kolom**: `id`, `name`, `email`, `phone`, `is_company`, `street`, `city`, `state`, `country_id`, `ref`.
+- **Kolom**: `id`, `name`, `email`, `phone`, `is_company`, `street`, `city`, `state`, `country_id`, `ref`, `customer_rank` *(opsional)*, `supplier_rank` *(opsional)*.
+- **`customer_rank`** & **`supplier_rank`**: Angka bulat (mis. `1`) untuk menandai partner sebagai pelanggan / pemasok, sehingga langsung muncul di filter *Customers* / *Vendors* dan jadi saran utama di field partner invoice / bill. Kosongkan jika tidak perlu - sel kosong tidak mengubah rank yang sudah ada (Odoo juga menaikkan rank ini otomatis tiap invoice / bill di-post).
 - **`is_company`**: Diisi `TRUE` untuk institusi/badan usaha, `FALSE` untuk individu.
 - **`state`** & **`country_id`**: Nama provinsi (mis. `D.I. Yogyakarta`) dan negara (mis. `Indonesia`).
 
