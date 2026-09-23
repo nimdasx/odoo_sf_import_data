@@ -2,7 +2,7 @@
 
 Modul shared untuk import Chart of Accounts (CoA), kontak partner, jurnal akuntansi, saldo awal kas & bank, aset tetap & depresiasi, saldo awal hutang & piutang, struktur analitik, serta penyesuaian nomenklatur laporan keuangan dari satu file Excel atau Google Sheets.
 
-- **Versi**: `19.0.1.2.0`
+- **Versi**: `19.0.1.4.0`
 - **Dependencies**: `accountant`, `mail` (Odoo Enterprise), Python: `openpyxl`, `requests`
 - **Fitur Bawaan**: Relabel `account_type` ke Bahasa Indonesia secara otomatis (`data/ir.model.fields.selection.csv`).
 - **Template Google Sheet**: [Template Import Data Master (Google Sheets)](https://docs.google.com/spreadsheets/d/1Hs-XjWxnb8qFXmuTXrZHzpJnQw4aXy_LuqDtuFQzAGY/edit?usp=sharing)
@@ -163,7 +163,7 @@ Bagan akun (COA) beserta nilai saldo awal neraca:
 > [!IMPORTANT]
 > **Aturan Akun Khusus (Jangan Diisi di Sheet Ini):**
 > - **Kas & Bank**: Kosongkan `opening_debit`/`opening_credit` di sheet ini. Saldo kas/bank diisi via kolom `opening_balance` di sheet `account.journal` / `a.j`.
-> - **Aset Tetap, Akumulasi Penyusutan, & Beban Penyusutan**: Kosongkan ketiganya jika menggunakan sheet `account.asset` / `a.as` agar nilai tidak tercatat ganda. **PENTING**: penulisan `opening_debit`/`opening_credit` bersifat *overwrite* per akun, bukan akumulasi — kalau akun yang sama diisi manual di sini **dan** dihitung otomatis dari `a.as`, nilai dari `a.as` akan menimpa (menghilangkan) nilai manual ini karena sheet `a.as` diproses setelah sheet ini.
+> - **Aset Tetap & Akumulasi Penyusutan**: Kosongkan keduanya jika menggunakan sheet `account.asset` / `a.as` agar nilai tidak tercatat ganda. **PENTING**: penulisan `opening_debit`/`opening_credit` bersifat *overwrite* per akun, bukan akumulasi — kalau akun yang sama diisi manual di sini **dan** dihitung otomatis dari `a.as`, nilai dari `a.as` akan menimpa (menghilangkan) nilai manual ini karena sheet `a.as` diproses setelah sheet ini.
 > - **Liquidity Transfer**: Dihitung otomatis dari akumulasi saldo kas/bank.
 > - **Laba Ditahan / Penyeimbang**: Dihitung otomatis oleh Odoo untuk menyeimbangkan total Debit dan Kredit.
 
@@ -218,11 +218,18 @@ Template model depresiasi aset untuk memudahkan pembuatan aset baru dengan penga
 
 ### 6. Sheet `account.asset` / `a.as` (Aset Tetap & Depresiasi)
 Master aset tetap untuk manajemen depresiasi otomatis Odoo Enterprise:
-- **Kolom**: `id`, `name`, `acquisition_date`, `original_value`, `already_depreciated_amount_import` *(opsional)*, `account_asset_id`, `account_depreciation_id`, `account_depreciation_expense_id`, `method`, `method_number`, `method_period`, `Jurnal`.
+- **Kolom**: `id`, `name`, `acquisition_date`, `original_value`, `already_depreciated_amount_import` *(opsional)*, `account_asset_id`, `account_depreciation_id`, `account_depreciation_expense_id`, `method`, `method_number`, `method_period`, `Jurnal`, `prorata_computation_type` *(opsional)*.
+- **`prorata_computation_type`** *(opsional)*: `none`, `constant_periods`, atau `daily_computation` (kode teknis Odoo). Kosongkan untuk memakai default Odoo. Jika diisi `constant_periods`, `prorata_date` otomatis diisi dengan konvensi pertengahan bulan:
+  - `acquisition_date` **sebelum tanggal 15** → `prorata_date` = tanggal 1 bulan tersebut (mis. `10/03/2024` → `01/03/2024`).
+  - `acquisition_date` **tanggal 15 ke atas** → `prorata_date` = tanggal 1 bulan berikutnya (mis. `15/03/2024` → `01/04/2024`).
+  
+  Kalkulasi otomatis `already_depreciated_amount_import` juga dihitung mulai dari `prorata_date` ini (bukan `acquisition_date`), supaya cocok dengan jadwal penyusutan Odoo.
+
+  Nilai selain tiga pilihan di atas diabaikan (dipakai default Odoo) dan dicatat sebagai *warning* di log import.
+- **Kolom bantu di spreadsheet** (mis. `prorata_date`, `already_depreciated_calculated`) hanya sebagai **acuan** untuk cek angka - importer tidak membacanya dan selalu menghitung sendiri.
 - **Catatan**: Akun aset/depresiasi/beban, metode, dan periode diisi **langsung per baris aset** (kolom sama seperti sheet `account.asset.model`), bukan melalui referensi `model_id` ke sheet `a.a.m`. Sheet `a.a.m` hanya membuat record template model aset di Odoo untuk dipakai manual di UI; tidak otomatis di-link ke baris `a.as`.
-- **Opening Balance Otomatis**: Total `original_value` dan akumulasi depresiasi otomatis mengisi debit/kredit akun terkait pada opening move.
-- **`already_depreciated_amount_import`**: Jika kosong, otomatis dihitung dari `acquisition_date` hingga `OPENING_BALANCE_DATE`. Isi manual hanya untuk override kalkulasi.
-- **Beban Penyusutan 1 Tahun Terakhir (Otomatis)**: Selain akumulasi penyusutan, sistem juga otomatis menghitung *debit* ke akun `account_depreciation_expense_id` sebesar beban penyusutan 12 bulan terakhir sebelum `OPENING_BALANCE_DATE` (akumulasi per `OPENING_BALANCE_DATE` dikurangi akumulasi per 12 bulan sebelumnya, prorata sama seperti di bawah) — supaya Laporan Laba Rugi "Tahun Lalu" tetap menunjukkan beban penyusutan tanpa perlu diisi manual. **Kosongkan** `opening_debit` akun beban penyusutan terkait di sheet `a.a` bila memakai fitur ini (lihat peringatan *overwrite* di atas).
+- **Opening Balance Otomatis**: Total `original_value` (debit akun aset) dan akumulasi depresiasi (kredit akun akumulasi) otomatis mengisi opening move. Akun beban penyusutan (laba rugi) **tidak** ikut diisi - jika memang perlu, isi manual `opening_debit` akun bebannya di sheet `a.a`.
+- **`already_depreciated_amount_import`**: Jika kosong, otomatis dihitung dari **tanggal mulai penyusutan** (`prorata_date` jika `prorata_computation_type` = `constant_periods`, selain itu `acquisition_date`) hingga `OPENING_BALANCE_DATE`. Isi manual hanya untuk override kalkulasi.
 
 #### Rumus & Logika Perhitungan Akumulasi Penyusutan (Prorata Odoo 19)
 Kalkulasi otomatis (*fallback*) menggunakan metode **Garis Lurus (*Straight Line*)** dengan standar Odoo 19 Enterprise berbasis **Prorata Temporis (*Constant Periods*)**:
@@ -231,12 +238,12 @@ Kalkulasi otomatis (*fallback*) menggunakan metode **Garis Lurus (*Straight Line
 Akumulasi Depresiasi = min(original_value, (original_value / method_number) * Periode Berlalu)
 ```
 
-Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari:
-1. **Prorata Bulan Pertama (Bulan Perolehan)**:
-   - `Prorata Awal = (Hari Aktif di Bulan Beli) / (Total Hari Kalender Bulan Beli)`
-   - `Prorata Awal = (days_in_month - acquisition_date.day + 1) / days_in_month`
+Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari **`tanggal_mulai`** - yaitu `prorata_date` jika `prorata_computation_type` = `constant_periods` (tanggal 1, lihat aturan tanggal 15 di atas), selain itu `acquisition_date`:
+1. **Prorata Bulan Pertama**:
+   - `Prorata Awal = (Hari Aktif di Bulan Mulai) / (Total Hari Kalender Bulan Mulai)`
+   - `Prorata Awal = (days_in_month - tanggal_mulai.day + 1) / days_in_month` *(selalu `1.0` jika `tanggal_mulai` = tanggal 1, yaitu kasus `constant_periods`)*
 2. **Bulan Penuh Antara**:
-   - `Bulan Penuh = (balance_date.year - acquisition_date.year) * 12 + (balance_date.month - acquisition_date.month - 1)`
+   - `Bulan Penuh = (balance_date.year - tanggal_mulai.year) * 12 + (balance_date.month - tanggal_mulai.month - 1)`
 3. **Prorata Bulan Cut-off**:
    - `Prorata Akhir = balance_date.day / days_in_month` *(bernilai `1.0` jika tanggal cut-off adalah akhir bulan)*
 4. **Total Periode Berlalu**:
@@ -245,13 +252,13 @@ Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari:
 > **Rumus Formula Spreadsheet / Excel (Kalkulasi Manual)**:
 > ```excel
 > =IF(
->   acquisition_date > balance_date,
+>   tanggal_mulai > balance_date,
 >   0,
 >   MIN(
 >     original_value,
 >     (original_value / method_number) * (
->       (EOMONTH(acquisition_date, 0) - acquisition_date + 1) / DAY(EOMONTH(acquisition_date, 0)) +
->       (YEAR(balance_date) - YEAR(acquisition_date)) * 12 + (MONTH(balance_date) - MONTH(acquisition_date) - 1) +
+>       (EOMONTH(tanggal_mulai, 0) - tanggal_mulai + 1) / DAY(EOMONTH(tanggal_mulai, 0)) +
+>       (YEAR(balance_date) - YEAR(tanggal_mulai)) * 12 + (MONTH(balance_date) - MONTH(tanggal_mulai) - 1) +
 >       DAY(balance_date) / DAY(EOMONTH(balance_date, 0))
 >     )
 >   )
@@ -259,7 +266,38 @@ Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari:
 > ```
 > Catatan: formula di atas berlaku untuk `method_period` = **Bulan**. Untuk `method_period` = **Tahun**, hasil `Periode Berlalu` (dalam satuan bulan) dibagi lagi dengan `12` sebelum dikalikan ke `(original_value / method_number)`.
 >
-> **Jangan pakai `DATEDIF(EOMONTH(acquisition_date,0), EOMONTH(balance_date,0), "M")`** untuk menghitung "Bulan Penuh" di atas — `DATEDIF` bisa salah hitung 1 bulan ketika kedua tanggal akhir-bulan itu berada di bulan dengan jumlah hari berbeda (mis. akhir Oktober/31 hari vs akhir Juni/30 hari). Versi sebelumnya di README ini memakai `DATEDIF` dan sekaligus lupa menambahkan Prorata Akhir (langkah 3 di atas) — kombinasi keduanya membuat hasilnya kurang tepat 1 bulan penyusutan dibanding kalkulasi Odoo.
+> **Jangan pakai `DATEDIF(EOMONTH(tanggal_mulai,0), EOMONTH(balance_date,0), "M")`** untuk menghitung "Bulan Penuh" di atas — `DATEDIF` bisa salah hitung 1 bulan ketika kedua tanggal akhir-bulan itu berada di bulan dengan jumlah hari berbeda (mis. akhir Oktober/31 hari vs akhir Juni/30 hari). Versi sebelumnya di README ini memakai `DATEDIF` dan sekaligus lupa menambahkan Prorata Akhir (langkah 3 di atas) — kombinasi keduanya membuat hasilnya kurang tepat 1 bulan penyusutan dibanding kalkulasi Odoo.
+
+#### Named Functions Google Sheets (Acuan)
+Untuk kolom bantu di sheet `a.as`, logika di atas bisa dibuat sebagai *named function* (menu **Data → Named functions**) supaya tiap sel cukup memanggil fungsi. Hasilnya hanya acuan - importer tetap menghitung sendiri.
+
+**`PRORATA_DATE(tgl_perolehan, tipe_prorata)`**
+```excel
+=IF(tgl_perolehan="", "",
+  IF(TRIM(tipe_prorata)="constant_periods",
+    IF(DAY(tgl_perolehan)<15,
+      DATE(YEAR(tgl_perolehan), MONTH(tgl_perolehan), 1),
+      EOMONTH(tgl_perolehan, 0) + 1),
+    tgl_perolehan))
+```
+
+**`AKUM_PENYUSUTAN(tgl_mulai, nilai, jumlah_periode, satuan_periode, per_tanggal)`**
+```excel
+=IF(OR(tgl_mulai="", jumlah_periode="", jumlah_periode=0, tgl_mulai>per_tanggal), 0,
+  LET(
+    elapsed, MAX(0,
+      (DAY(EOMONTH(tgl_mulai,0)) - DAY(tgl_mulai) + 1) / DAY(EOMONTH(tgl_mulai,0))
+      + DAY(per_tanggal) / DAY(EOMONTH(per_tanggal,0))
+      + (YEAR(per_tanggal)-YEAR(tgl_mulai))*12 + (MONTH(per_tanggal)-MONTH(tgl_mulai)-1)
+    ),
+    periods, IF(satuan_periode="Tahun", elapsed/12, elapsed),
+    MIN(nilai, nilai/jumlah_periode * MIN(periods, jumlah_periode))
+  ))
+```
+
+Contoh pemakaian di baris 2 (sesuaikan huruf kolom dengan susunan sheet):
+- `prorata_date`: `=PRORATA_DATE(C2, O2)` *(C = `acquisition_date`, O = `prorata_computation_type`)*
+- `already_depreciated_calculated`: `=AKUM_PENYUSUTAN(P2, D2, E2, F2, DATEVALUE('c'!$B$2))` *(P = `prorata_date`, D = `original_value`, E = `method_number`, F = `method_period`, `'c'!B2` = `OPENING_BALANCE_DATE` berupa teks; jika B2 bertipe tanggal, hilangkan `DATEVALUE`)*
 
 ---
 

@@ -75,6 +75,7 @@ def find_sheet(wb, canonical_or_alias):
 JOURNAL_TYPES = {"Bank": "bank", "Kas": "cash", "Lain-lain": "general"}
 ASSET_METHODS = {"Garis Lurus": "linear"}
 ASSET_PERIODS = {"Bulan": "1", "Tahun": "12"}
+ASSET_PRORATA_COMPUTATION_TYPES = ("none", "constant_periods", "daily_computation")
 ACCOUNT_TYPES = {
     "piutang": "asset_receivable",
     "bank dan tunai": "asset_cash",
@@ -474,15 +475,24 @@ def _elapsed_depreciation_periods(acquisition_date, balance_date, method_period)
 
 def _accumulated_depreciation(original_value, acquisition_date, asof_date, method_number, method_period):
     """Akumulasi penyusutan (metode constant_periods Odoo 19) dari acquisition_date
-    sampai asof_date - dipakai baik untuk already_depreciated_amount_import (asof_date
-    = balance_date) maupun untuk menghitung beban penyusutan 1 tahun terakhir
-    (selisih akumulasi di balance_date dan di balance_date - 12 bulan).
+    sampai asof_date - dipakai untuk already_depreciated_amount_import (asof_date
+    = balance_date).
     """
     if not method_number:
         return 0.0
     elapsed = _elapsed_depreciation_periods(acquisition_date, asof_date, method_period)
     elapsed = min(elapsed, method_number)
     return original_value / method_number * elapsed
+
+
+def _mid_month_prorata_date(acquisition_date):
+    """Konvensi pertengahan bulan: perolehan sebelum tanggal 15 mulai disusutkan
+    dari tanggal 1 bulan itu, tanggal 15 ke atas dari tanggal 1 bulan berikutnya.
+    """
+    first_of_month = acquisition_date.replace(day=1)
+    if acquisition_date.day < 15:
+        return first_of_month
+    return first_of_month + relativedelta(months=1)
 
 
 def _write_opening_balances(env, totals):
@@ -1324,7 +1334,7 @@ def _import_account_asset(env, wb, balance_date, logger=None):
     columns = (
         "id", "name", "acquisition_date", "original_value", "already_depreciated_amount_import",
         "account_asset_id", "account_depreciation_id", "account_depreciation_expense_id",
-        "method", "method_number", "method_period", "Jurnal",
+        "method", "method_number", "method_period", "Jurnal", "prorata_computation_type",
     )
     opening_totals = {}  # account.account recordset -> [opening_debit, opening_credit]
 
@@ -1378,20 +1388,32 @@ def _import_account_asset(env, wb, balance_date, logger=None):
         method_number = int(row.get("method_number") or 1)
         method = ASSET_METHODS.get(row.get("method"), "linear")
 
+        prorata_computation_type = str(row.get("prorata_computation_type") or "").strip().lower() or False
+        if prorata_computation_type and prorata_computation_type not in ASSET_PRORATA_COMPUTATION_TYPES:
+            if logger:
+                logger.log(
+                    sheet,
+                    row_num,
+                    row.get("id", "") or f"Row {row_num}",
+                    row.get("name", ""),
+                    "warning",
+                    f"Aset '{row['name']}': prorata_computation_type '{row.get('prorata_computation_type')}' "
+                    f"tidak valid (pilihan: {', '.join(ASSET_PRORATA_COMPUTATION_TYPES)}) - diabaikan.",
+                )
+            prorata_computation_type = False
+        prorata_date = None
+        if prorata_computation_type == "constant_periods":
+            prorata_date = _mid_month_prorata_date(acquisition_date)
+        # Odoo memulai jadwal penyusutan dari prorata_date, jadi akumulasi
+        # otomatis di bawah juga harus dihitung dari tanggal yang sama supaya
+        # opening balance cocok dengan depreciation board-nya.
+        depreciation_start = prorata_date or acquisition_date
+
         already_depreciated = row.get("already_depreciated_amount_import")
         if already_depreciated in (None, ""):
             already_depreciated = _accumulated_depreciation(
-                original_value, acquisition_date, balance_date, method_number, method_period
+                original_value, depreciation_start, balance_date, method_number, method_period
             )
-
-        # Beban penyusutan 1 tahun terakhir = akumulasi per balance_date dikurangi
-        # akumulasi per 12 bulan sebelumnya - dipakai supaya Laporan Laba Rugi
-        # "Tahun Lalu" tetap menunjukkan beban penyusutan tanpa harus diisi manual
-        # di sheet a.a (lihat juga catatan "Aturan Akun Khusus" di README).
-        depreciation_expense_1y = already_depreciated - _accumulated_depreciation(
-            original_value, acquisition_date, balance_date - relativedelta(months=12), method_number, method_period
-        )
-        depreciation_expense_1y = max(depreciation_expense_1y, 0.0)
 
         values = {
             "name": row["name"],
@@ -1406,6 +1428,10 @@ def _import_account_asset(env, wb, balance_date, logger=None):
             "method_period": method_period,
             "journal_id": journal.id if journal else False,
         }
+        if prorata_computation_type:
+            values["prorata_computation_type"] = prorata_computation_type
+        if prorata_date:
+            values["prorata_date"] = prorata_date
         asset_id = row.get("id") or f"account_asset_{row['name']}"
         asset = _get_or_create(env, "account.asset", asset_id, values)
         if VALIDATE_IMPORTED_ASSETS and asset.state == "draft":
@@ -1417,8 +1443,6 @@ def _import_account_asset(env, wb, balance_date, logger=None):
         _add_opening(asset_account, debit=original_value)
         if depreciation_account:
             _add_opening(depreciation_account, credit=already_depreciated)
-        if dep_expense_account:
-            _add_opening(dep_expense_account, debit=depreciation_expense_1y)
 
         if logger:
             logger.log(
