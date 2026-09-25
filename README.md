@@ -220,12 +220,19 @@ Template model depresiasi aset untuk memudahkan pembuatan aset baru dengan penga
 Master aset tetap untuk manajemen depresiasi otomatis Odoo Enterprise:
 - **Kolom**: `id`, `name`, `acquisition_date`, `original_value`, `already_depreciated_amount_import` *(opsional)*, `account_asset_id`, `account_depreciation_id`, `account_depreciation_expense_id`, `method`, `method_number`, `method_period`, `Jurnal`, `prorata_computation_type` *(opsional)*.
 - **`prorata_computation_type`** *(opsional)*: `none`, `constant_periods`, atau `daily_computation` (kode teknis Odoo). Kosongkan untuk memakai default Odoo. Jika diisi `constant_periods`, `prorata_date` otomatis diisi dengan konvensi pertengahan bulan:
-  - `acquisition_date` **sebelum tanggal 15** → `prorata_date` = tanggal 1 bulan tersebut (mis. `10/03/2024` → `01/03/2024`).
-  - `acquisition_date` **tanggal 15 ke atas** → `prorata_date` = tanggal 1 bulan berikutnya (mis. `15/03/2024` → `01/04/2024`).
+  - `acquisition_date` **sebelum tanggal 15** (tanggal `< 15`) → `prorata_date` = tanggal 1 bulan tersebut (mis. `10/03/2024` → `01/03/2024`).
+  - `acquisition_date` **tanggal 15 ke atas** (tanggal `>= 15`, termasuk tanggal 15 itu sendiri) → `prorata_date` = tanggal 1 bulan berikutnya (mis. `15/03/2024` → `01/04/2024`).
   
-  Kalkulasi otomatis `already_depreciated_amount_import` juga dihitung mulai dari `prorata_date` ini (bukan `acquisition_date`), supaya cocok dengan jadwal penyusutan Odoo.
+  Kalkulasi otomatis `already_depreciated_amount_import` juga dihitung mulai dari `prorata_date` ini (bukan `acquisition_date`), supaya cocok dengan jadwal penyusutan Odoo. Akibatnya aset yang diperoleh tanggal 15 s.d. akhir bulan cut-off (mis. `15/12/2025` dengan `OPENING_BALANCE_DATE` = `31/12/2025`) punya `prorata_date` **setelah** `OPENING_BALANCE_DATE` → akumulasinya `0`, tapi aset tetap dibuat dan nilai perolehannya tetap masuk opening balance (aset sudah dimiliki per tanggal cut-off; penyusutannya baru mulai bulan berikutnya).
 
   Nilai selain tiga pilihan di atas diabaikan (dipakai default Odoo) dan dicatat sebagai *warning* di log import.
+- **Baris yang dilewati** (tidak dibuat asetnya dan **tidak** ikut opening balance), dicatat sebagai *warning* di log import:
+  - `acquisition_date` **kosong** - penyusutan tidak bisa dihitung tanpa tanggal perolehan.
+  - `acquisition_date` **setelah** `OPENING_BALANCE_DATE` - aset belum dimiliki per tanggal saldo awal; catat pembeliannya lewat transaksi biasa (vendor bill / jurnal), bukan lewat sheet ini, supaya tidak tercatat ganda.
+
+  Pembandingnya sengaja `acquisition_date`, **bukan** `prorata_date` (lihat contoh `15/12/2025` di atas).
+
+  Baris juga dilewati (status *skipped*) jika `method_period` kosong / tidak valid, atau akun aset (`account_asset_id`) tidak ditemukan.
 - **Kolom bantu di spreadsheet** (mis. `prorata_date`, `already_depreciated_calculated`) hanya sebagai **acuan** untuk cek angka - importer tidak membacanya dan selalu menghitung sendiri.
 - **Catatan**: Akun aset/depresiasi/beban, metode, dan periode diisi **langsung per baris aset** (kolom sama seperti sheet `account.asset.model`), bukan melalui referensi `model_id` ke sheet `a.a.m`. Sheet `a.a.m` hanya membuat record template model aset di Odoo untuk dipakai manual di UI; tidak otomatis di-link ke baris `a.as`.
 - **Opening Balance Otomatis**: Total `original_value` (debit akun aset) dan akumulasi depresiasi (kredit akun akumulasi) otomatis mengisi opening move. Akun beban penyusutan (laba rugi) **tidak** ikut diisi - jika memang perlu, isi manual `opening_debit` akun bebannya di sheet `a.a`.

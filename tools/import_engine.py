@@ -1382,7 +1382,35 @@ def _import_account_asset(env, wb, balance_date, logger=None):
         depreciation_account = _account_by_code_name(env, row.get("account_depreciation_id"))
         dep_expense_account = _account_by_code_name(env, row.get("account_depreciation_expense_id"))
         method_period = ASSET_PERIODS[raw_period]
-        acquisition_date = _parse_sheet_date(row.get("acquisition_date"), "acquisition_date") or balance_date
+        # Aset tanpa tanggal perolehan tidak bisa dihitung penyusutannya, dan
+        # aset yang diperoleh setelah OPENING_BALANCE_DATE belum dimiliki per
+        # tanggal saldo awal (pembeliannya dicatat lewat transaksi biasa) -
+        # keduanya dilewati supaya tidak ikut masuk opening balance. Sengaja
+        # dibandingkan dengan acquisition_date, bukan prorata_date: aset yang
+        # dibeli 15-31 Desember sudah dimiliki per 31 Desember walau
+        # penyusutannya baru mulai 1 Januari.
+        raw_acquisition_date = row.get("acquisition_date")
+        acquisition_date = (
+            _parse_sheet_date(raw_acquisition_date, "acquisition_date")
+            if raw_acquisition_date not in (None, "")
+            else None
+        )
+        if not acquisition_date or acquisition_date > balance_date:
+            if logger:
+                reason = (
+                    "tanggal perolehan (acquisition_date) kosong"
+                    if not acquisition_date
+                    else f"tanggal perolehan {acquisition_date} setelah OPENING_BALANCE_DATE {balance_date}"
+                )
+                logger.log(
+                    sheet,
+                    row_num,
+                    row.get("id", "") or f"Row {row_num}",
+                    row.get("name", ""),
+                    "warning",
+                    f"Aset '{row['name']}' dilewati: {reason}.",
+                )
+            continue
 
         original_value = row.get("original_value") or 0.0
         method_number = int(row.get("method_number") or 1)
