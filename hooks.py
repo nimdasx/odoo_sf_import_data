@@ -1,6 +1,7 @@
 """Backward-compatibility shim.
 
-The core import engine has been refactored into `tools/import_engine.py`.
+The core import engine lives in `tools/` (entry point `tools/import_engine.py`,
+importers per sheet in the sibling modules).
 This module re-exports public functions, classes, and constants so external callers
 (such as client config modules using `post_init_hook`) continue to work seamlessly.
 """

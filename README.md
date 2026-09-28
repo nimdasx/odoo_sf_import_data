@@ -47,8 +47,12 @@ Modul shared untuk import Chart of Accounts (CoA), kontak partner, jurnal akunta
    - **Otomatis Posting Log Eksekusi**: Sistem secara otomatis mencatat pesan saat proses import dimulai, ringkasan saat selesai (jumlah baris sukses, peringatan, skip, error), serta detail kegagalan jika terjadi error.
    - **Field Tracking**: Perubahan status, user, tanggal, dan metrik total baris tercatat pada log jejak audit.
 
-7. **Arsitektur Bersih (`tools/import_engine.py`)**:
-   - Seluruh logika bisnis import dimodularisasi ke dalam folder `tools/import_engine.py`.
+7. **Arsitektur Bersih (folder `tools/`)**:
+   - Seluruh logika bisnis import ada di folder `tools/`, dipecah per sheet:
+     - `import_engine.py`: entry point `run_import` / `import_bundled_data`, validasi & cleanup sebelum import.
+     - `common.py`: helper bersama (alias sheet, pembacaan baris, parser sel, `ImportLogger`, opening balance) dan flag `POST_OPENING_MOVES`.
+     - `company.py` (`c`), `account.py` (`a.a`, `a.j`), `partner.py` (`r.p`), `opening_move.py` (`v.b`, `c.i`, kas/bank), `asset.py` (`a.a.m`, `a.as`), `report_analytic.py` (`a.an.p`, `a.an.a`, `a.r`, `a.r.l`).
+   - Nama yang sudah dipakai dari luar (`run_import`, `SHEET_ALIASES`, `ImportLogger`, dll.) tetap bisa di-import dari `tools/import_engine.py`.
    - Root `hooks.py` disediakan sebagai *backward-compatibility wrapper* sehingga modul klien lama (`sf_lazis_unisia_konfig`, `sf_sma_uii_konfig`, dll.) tetap kompatibel 100% tanpa breaking changes.
 
 ---
@@ -368,8 +372,8 @@ Menyesuaikan nama baris laporan keuangan:
 
 ---
 
-## Konfigurasi Flags (`tools/import_engine.py`)
+## Konfigurasi Flags
 
-- `VALIDATE_IMPORTED_ASSETS` (default `False`): Set `True` jika ingin asset langsung tervalidasi setelah di-import.
-- `POST_OPENING_MOVES` (default `False`): Set `True` jika ingin opening move partner (sheet `v.b` / `c.i` dan saldo awal hutang/piutang dari sheet `r.p`) langsung ter-post.
+- `VALIDATE_IMPORTED_ASSETS` (`tools/asset.py`, default `False`): Set `True` jika ingin asset langsung tervalidasi setelah di-import.
+- `POST_OPENING_MOVES` (`tools/common.py`, default `False`): Set `True` jika ingin opening move partner (sheet `v.b` / `c.i` dan saldo awal hutang/piutang dari sheet `r.p`) langsung ter-post.
 
