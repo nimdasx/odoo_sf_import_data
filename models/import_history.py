@@ -146,6 +146,9 @@ class SfImportHistory(models.Model):
                 lambda l: l.sheet_name in move_names
                 or "bill" in (l.sheet_name or "").lower()
                 or "invoice" in (l.sheet_name or "").lower()
+                # saldo awal hutang/piutang dari r.p: "r.p (Hutang)" / "r.p (Piutang)"
+                or "hutang" in (l.sheet_name or "").lower()
+                or "piutang" in (l.sheet_name or "").lower()
             )
             rec.report_analytic_line_ids = rec.line_ids.filtered(
                 lambda l: l.sheet_name in report_analytic_names

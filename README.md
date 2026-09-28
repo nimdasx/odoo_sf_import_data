@@ -27,7 +27,7 @@ Modul shared untuk import Chart of Accounts (CoA), kontak partner, jurnal akunta
      - 📑 **Tab Kas & Bank**: Log mutasi saldo awal rekening kas dan bank.
      - 📑 **Tab Aset Tetap**: Log pendaftaran aset tetap dan depresiasi.
      - 📑 **Tab Kontak / Partner**: Log sinkronisasi partner / kontak.
-     - 📑 **Tab Saldo Awal Hutang / Piutang**: Log transaksi saldo awal faktur vendor dan customer.
+     - 📑 **Tab Saldo Awal Hutang / Piutang**: Log transaksi saldo awal faktur vendor dan customer (sheet `v.b` / `c.i`) serta saldo awal hutang/piutang per partner dari sheet `r.p`.
      - 📑 **Tab Laporan & Analitik**: Log profil perusahaan, rencana analitik, akun analitik, dan baris laporan keuangan.
      - 📑 **Tab Semua Log Record**: Tampilan global seluruh baris dari semua sheet.
      - 📑 **Tab Ringkasan Statistik**: Rangkuman angka kalkulasi metrik import.
@@ -147,10 +147,29 @@ Menyimpan konfigurasi umum perusahaan dalam format pasangan kunci-nilai (Kolom A
 
 ### 2. Sheet `res.partner` / `r.p` (Kontak / Partner)
 Master data kontak pelanggan, pemasok, donatur, muzakki, amil, atau karyawan:
-- **Kolom**: `id`, `name`, `email`, `phone`, `is_company`, `street`, `city`, `state`, `country_id`, `ref`, `customer_rank` *(opsional)*, `supplier_rank` *(opsional)*.
+- **Kolom**: `id`, `name`, `email`, `phone`, `is_company`, `street`, `city`, `state`, `country_id`, `ref`, `customer_rank` *(opsional)*, `supplier_rank` *(opsional)*, `property_account_payable_id` *(opsional)*, `property_account_receivable_id` *(opsional)*.
 - **`customer_rank`** & **`supplier_rank`**: Angka bulat (mis. `1`) untuk menandai partner sebagai pelanggan / pemasok, sehingga langsung muncul di filter *Customers* / *Vendors* dan jadi saran utama di field partner invoice / bill. Kosongkan jika tidak perlu - sel kosong tidak mengubah rank yang sudah ada (Odoo juga menaikkan rank ini otomatis tiap invoice / bill di-post).
 - **`is_company`**: Diisi `TRUE` untuk institusi/badan usaha, `FALSE` untuk individu.
 - **`state`** & **`country_id`**: Nama provinsi (mis. `D.I. Yogyakarta`) dan negara (mis. `Indonesia`).
+- **`property_account_payable_id`** & **`property_account_receivable_id`** *(opsional)*: Akun hutang / piutang default partner (format `"kode nama"`), dipakai otomatis di bill / invoice baru ke partner itu - sekaligus akun saldo awal hutang/piutang di bawah. Diisi setelah sheet `a.a` diimport, jadi boleh memakai akun yang baru dibuat di `a.a`. Sel kosong tidak mengubah akun default yang sudah ada. Akun yang tidak ditemukan, nonaktif, atau tipenya bukan `liability_payable` / `asset_receivable` **tidak** dipasang sebagai akun default (warning di tab **Kontak / Partner**) - Odoo menolak bill / invoice di akun hutang/piutang yang tipenya tidak cocok.
+
+#### Saldo Awal Hutang & Piutang per Partner *(opsional)*
+Cara ringkas mengisi saldo awal hutang/piutang: cukup tambah kolom di sheet `r.p`, satu baris per partner - tanpa perlu format header + detail seperti sheet `v.b` / `c.i`.
+
+| Kolom | Wajib? | Keterangan |
+|---|---|---|
+| `property_account_payable_id` / `property_account_receivable_id` | Tidak | Format sama dengan sheet lain (`"kode nama"`, mis. `2102015000 Hutang Usaha`). Juga disimpan sebagai akun default partner (lihat di atas). Kosong → akun hutang/piutang default partner yang sudah ada. |
+| `nominal_hutang` / `nominal_piutang` | Ya (untuk diimport) | Positif = saldo normal (hutang di kredit, piutang di debit). Negatif = saldo terbalik, mis. uang muka ke vendor. Kosong / `0` → partner tidak punya saldo jenis ini. |
+| `jatuh_tempo_hutang` / `jatuh_tempo_piutang` | Tidak | Dipakai *Aged Payable / Receivable*. Kosong → `OPENING_BALANCE_DATE`. |
+| `ref_hutang` / `ref_piutang` | Tidak | Nomor faktur/dokumen, ditambahkan ke keterangan baris jurnal (mis. `Saldo awal hutang - PT ABC (INV-001)`) untuk memudahkan pencocokan pembayaran. Beda dengan kolom `ref` (kode internal partner). |
+
+- **Hasil**: **1 journal entry untuk seluruh hutang** (`Saldo awal hutang partner`) dan **1 journal entry untuk seluruh piutang** (`Saldo awal piutang partner`), tanggal `OPENING_BALANCE_DATE`, di jurnal yang sama dengan opening move perusahaan (jurnal umum / *Miscellaneous*). Isinya 1 baris per partner + 1 baris penyeimbang (*Automatic Balancing Line*) ke akun *unaffected earnings*, sama seperti `v.b` / `c.i`. Reconcile pembayaran & umur hutang/piutang tetap per partner karena bekerja per baris jurnal.
+- **Draft dulu, posting sekali**: selama masih draft, import ulang aman (isi jurnal diganti; kalau semua nominal dikosongkan, draft-nya dihapus). Setelah di-posting, import ulang **melewati** jurnal itu - koreksi lewat jurnal penyesuaian terpisah, karena mengembalikan jurnal ke draft akan melepas semua reconcile pembayaran di dalamnya.
+- **`supplier_rank` / `customer_rank`** otomatis diisi `1` jika partner punya nominal hutang/piutang dan kolom rank-nya kosong.
+- **Baris dilewati (warning)**: nominal bukan angka, partner tidak ditemukan, akun tidak ditemukan, akun **nonaktif**, atau tanggal jatuh tempo tidak valid. Baris lain tetap diimport. Akun default partner dari chart of account bawaan sering sudah dinonaktifkan oleh cleanup (tidak ada di sheet `a.a`) - dalam kasus itu isi `property_account_payable_id` / `property_account_receivable_id` secara eksplisit.
+- **Tetap diimport tapi warning**: akun bukan tipe `liability_payable` / `asset_receivable` (tidak muncul di *Aged Payable / Receivable*), atau partner + akun yang sama juga diisi di sheet `v.b` / `c.i`.
+- **Hindari tercatat ganda**: saldo hutang/piutang yang sama cukup diisi di **salah satu** tempat - kolom ini, sheet `v.b` / `c.i`, **atau** `opening_debit` / `opening_credit` akun hutang/piutang di sheet `a.a`.
+- Log import tampil di tab **Saldo Awal Hutang / Piutang** dengan nama sheet `r.p (Hutang)` / `r.p (Piutang)`.
 
 ---
 
@@ -172,14 +191,14 @@ Bagan akun (COA) beserta nilai saldo awal neraca:
 | Kategori | Tipe Akun (Bahasa Indonesia) | Technical Type (`account_type`) | Posisi Saldo Normal | Keterangan & Catatan Khusus |
 | :--- | :--- | :--- | :---: | :--- |
 | **Aset** | Bank dan Tunai | `asset_cash` | **DEBIT** | Kosongkan di sheet ini, diisi via `opening_balance` di sheet `account.journal` / `a.j`. |
-| **Aset** | Piutang | `asset_receivable` | **DEBIT** | Disarankan lewat sheet `customer_invoice` / `c.i` agar ada rincian per partner. |
+| **Aset** | Piutang | `asset_receivable` | **DEBIT** | Disarankan lewat kolom `nominal_piutang` di sheet `r.p` atau sheet `customer_invoice` / `c.i` agar ada rincian per partner. |
 | **Aset** | Cadangan Piutang Tak Tertagih *(Contra-Asset)* | `asset_receivable` / `asset_current` | **KREDIT** | Penyisihan piutang ragu-ragu. Masukkan di `opening_credit` (positif). |
 | **Aset** | Aktiva Lancar | `asset_current` | **DEBIT** | Persediaan (*inventory*), uang muka, perlengkapan, dll. |
 | **Aset** | Aktiva Tidak Lancar | `asset_non_current` | **DEBIT** | Investasi jangka panjang, piutang jangka panjang. |
 | **Aset** | Prabayar | `asset_prepayments` | **DEBIT** | Biaya dibayar dimuka (*prepaid expenses*), sewa dibayar dimuka. |
 | **Aset** | Aktiva Tetap | `asset_fixed` | **DEBIT** | Nilai perolehan aset tetap (tanah, bangunan, kendaraan, peralatan). |
 | **Aset** | Akumulasi Penyusutan *(Contra-Asset)* | `asset_fixed` / `asset_non_current` | **KREDIT** | **PENTING**: Masukkan di kolom `opening_credit` (positif), **jangan** angka minus di debit! |
-| **Liabilitas** | Utang | `liability_payable` | **KREDIT** | Disarankan lewat sheet `vendor_bill` / `v.b` agar ada rincian per partner. |
+| **Liabilitas** | Utang | `liability_payable` | **KREDIT** | Disarankan lewat kolom `nominal_hutang` di sheet `r.p` atau sheet `vendor_bill` / `v.b` agar ada rincian per partner. |
 | **Liabilitas** | Kartu Kredit | `liability_credit_card` | **KREDIT** | Kewajiban kartu kredit korporasi. |
 | **Liabilitas** | Pasiva Terkini | `liability_current` | **KREDIT** | Utang lancar, utang gaji, utang pajak, pendapatan diterima dimuka. |
 | **Liabilitas** | Hutang Tidak Lancar | `liability_non_current` | **KREDIT** | Utang bank jangka panjang, obligasi, liabilitas sewa pembiayaan. |
@@ -218,7 +237,7 @@ Template model depresiasi aset untuk memudahkan pembuatan aset baru dengan penga
 
 ### 6. Sheet `account.asset` / `a.as` (Aset Tetap & Depresiasi)
 Master aset tetap untuk manajemen depresiasi otomatis Odoo Enterprise:
-- **Kolom**: `id`, `name`, `acquisition_date`, `original_value`, `already_depreciated_amount_import` *(opsional)*, `account_asset_id`, `account_depreciation_id`, `account_depreciation_expense_id`, `method`, `method_number`, `method_period`, `Jurnal`, `prorata_computation_type` *(opsional)*.
+- **Kolom**: `id`, `name`, `acquisition_date`, `original_value`, `already_depreciated_amount_import` *(opsional)*, `account_asset_id`, `account_depreciation_id`, `account_depreciation_expense_id`, `method`, `method_number`, `method_period`, `Jurnal`, `prorata_computation_type` *(opsional)*, `salvage_value` *(opsional)*.
 - **`prorata_computation_type`** *(opsional)*: `none`, `constant_periods`, atau `daily_computation` (kode teknis Odoo). Kosongkan untuk memakai default Odoo. Jika diisi `constant_periods`, `prorata_date` otomatis diisi dengan konvensi pertengahan bulan:
   - `acquisition_date` **sebelum tanggal 15** (tanggal `< 15`) → `prorata_date` = tanggal 1 bulan tersebut (mis. `10/03/2024` → `01/03/2024`).
   - `acquisition_date` **tanggal 15 ke atas** (tanggal `>= 15`, termasuk tanggal 15 itu sendiri) → `prorata_date` = tanggal 1 bulan berikutnya (mis. `15/03/2024` → `01/04/2024`).
@@ -237,12 +256,14 @@ Master aset tetap untuk manajemen depresiasi otomatis Odoo Enterprise:
 - **Catatan**: Akun aset/depresiasi/beban, metode, dan periode diisi **langsung per baris aset** (kolom sama seperti sheet `account.asset.model`), bukan melalui referensi `model_id` ke sheet `a.a.m`. Sheet `a.a.m` hanya membuat record template model aset di Odoo untuk dipakai manual di UI; tidak otomatis di-link ke baris `a.as`.
 - **Opening Balance Otomatis**: Total `original_value` (debit akun aset) dan akumulasi depresiasi (kredit akun akumulasi) otomatis mengisi opening move. Akun beban penyusutan (laba rugi) **tidak** ikut diisi - jika memang perlu, isi manual `opening_debit` akun bebannya di sheet `a.a`.
 - **`already_depreciated_amount_import`**: Jika kosong, otomatis dihitung dari **tanggal mulai penyusutan** (`prorata_date` jika `prorata_computation_type` = `constant_periods`, selain itu `acquisition_date`) hingga `OPENING_BALANCE_DATE`. Isi manual hanya untuk override kalkulasi.
+- **`salvage_value`** *(opsional)*: Nilai residu (*Not Depreciable Value* di Odoo) - bagian nilai aset yang tidak disusutkan. Kosong = `0`. Nilai yang disusutkan menjadi `original_value - salvage_value`, dan kalkulasi otomatis `already_depreciated_amount_import` juga memakai nilai ini. Opening balance akun aset tetap mencatat `original_value` penuh. Jika bukan angka, negatif, atau lebih besar dari `original_value`, baris diberi *warning* dan `salvage_value` dianggap `0`.
 
 #### Rumus & Logika Perhitungan Akumulasi Penyusutan (Prorata Odoo 19)
 Kalkulasi otomatis (*fallback*) menggunakan metode **Garis Lurus (*Straight Line*)** dengan standar Odoo 19 Enterprise berbasis **Prorata Temporis (*Constant Periods*)**:
 
 ```text
-Akumulasi Depresiasi = min(original_value, (original_value / method_number) * Periode Berlalu)
+Nilai Disusutkan     = original_value - salvage_value
+Akumulasi Depresiasi = min(Nilai Disusutkan, (Nilai Disusutkan / method_number) * Periode Berlalu)
 ```
 
 Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari **`tanggal_mulai`** - yaitu `prorata_date` jika `prorata_computation_type` = `constant_periods` (tanggal 1, lihat aturan tanggal 15 di atas), selain itu `acquisition_date`:
@@ -262,8 +283,8 @@ Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari **`tanggal_mulai`
 >   tanggal_mulai > balance_date,
 >   0,
 >   MIN(
->     original_value,
->     (original_value / method_number) * (
+>     original_value - salvage_value,
+>     ((original_value - salvage_value) / method_number) * (
 >       (EOMONTH(tanggal_mulai, 0) - tanggal_mulai + 1) / DAY(EOMONTH(tanggal_mulai, 0)) +
 >       (YEAR(balance_date) - YEAR(tanggal_mulai)) * 12 + (MONTH(balance_date) - MONTH(tanggal_mulai) - 1) +
 >       DAY(balance_date) / DAY(EOMONTH(balance_date, 0))
@@ -271,7 +292,7 @@ Di mana **Periode Berlalu** (dalam satuan bulan) dihitung dari **`tanggal_mulai`
 >   )
 > )
 > ```
-> Catatan: formula di atas berlaku untuk `method_period` = **Bulan**. Untuk `method_period` = **Tahun**, hasil `Periode Berlalu` (dalam satuan bulan) dibagi lagi dengan `12` sebelum dikalikan ke `(original_value / method_number)`.
+> Catatan: formula di atas berlaku untuk `method_period` = **Bulan**. Untuk `method_period` = **Tahun**, hasil `Periode Berlalu` (dalam satuan bulan) dibagi lagi dengan `12` sebelum dikalikan ke `((original_value - salvage_value) / method_number)`.
 >
 > **Jangan pakai `DATEDIF(EOMONTH(tanggal_mulai,0), EOMONTH(balance_date,0), "M")`** untuk menghitung "Bulan Penuh" di atas — `DATEDIF` bisa salah hitung 1 bulan ketika kedua tanggal akhir-bulan itu berada di bulan dengan jumlah hari berbeda (mis. akhir Oktober/31 hari vs akhir Juni/30 hari). Versi sebelumnya di README ini memakai `DATEDIF` dan sekaligus lupa menambahkan Prorata Akhir (langkah 3 di atas) — kombinasi keduanya membuat hasilnya kurang tepat 1 bulan penyusutan dibanding kalkulasi Odoo.
 
@@ -288,23 +309,25 @@ Untuk kolom bantu di sheet `a.as`, logika di atas bisa dibuat sebagai *named fun
     tgl_perolehan))
 ```
 
-**`AKUM_PENYUSUTAN(tgl_mulai, nilai, jumlah_periode, satuan_periode, per_tanggal)`**
+**`AKUM_PENYUSUTAN(tgl_mulai, nilai, jumlah_periode, satuan_periode, per_tanggal, nilai_residu)`**
 ```excel
 =IF(OR(tgl_mulai="", jumlah_periode="", jumlah_periode=0, tgl_mulai>per_tanggal), 0,
   LET(
+    disusutkan, nilai - N(nilai_residu),
     elapsed, MAX(0,
       (DAY(EOMONTH(tgl_mulai,0)) - DAY(tgl_mulai) + 1) / DAY(EOMONTH(tgl_mulai,0))
       + DAY(per_tanggal) / DAY(EOMONTH(per_tanggal,0))
       + (YEAR(per_tanggal)-YEAR(tgl_mulai))*12 + (MONTH(per_tanggal)-MONTH(tgl_mulai)-1)
     ),
     periods, IF(satuan_periode="Tahun", elapsed/12, elapsed),
-    MIN(nilai, nilai/jumlah_periode * MIN(periods, jumlah_periode))
+    MIN(disusutkan, disusutkan/jumlah_periode * MIN(periods, jumlah_periode))
   ))
 ```
+`nilai_residu` = `salvage_value`; sel kosong dihitung `0` lewat `N()`. Semua argumen named function Google Sheets wajib diisi, jadi pemanggilan lama dengan 5 argumen harus ikut diubah.
 
-Contoh pemakaian di baris 2 (sesuaikan huruf kolom dengan susunan sheet):
-- `prorata_date`: `=PRORATA_DATE(C2, O2)` *(C = `acquisition_date`, O = `prorata_computation_type`)*
-- `already_depreciated_calculated`: `=AKUM_PENYUSUTAN(P2, D2, E2, F2, DATEVALUE('c'!$B$2))` *(P = `prorata_date`, D = `original_value`, E = `method_number`, F = `method_period`, `'c'!B2` = `OPENING_BALANCE_DATE` berupa teks; jika B2 bertipe tanggal, hilangkan `DATEVALUE`)*
+Contoh pemakaian di baris 2 (susunan kolom sheet `a.as` di template; sesuaikan jika berbeda):
+- `prorata_date` (O): `=PRORATA_DATE(C2, N2)` *(C = `acquisition_date`, N = `prorata_computation_type`)*
+- `already_depreciated_calculated` (G): `=AKUM_PENYUSUTAN(O2, D2, E2, F2, 'c'!B$2, P2)` *(O = `prorata_date`, D = `original_value`, E = `method_number`, F = `method_period`, `'c'!B2` = `OPENING_BALANCE_DATE`, P = `salvage_value`; jika B2 berupa teks, bungkus dengan `DATEVALUE('c'!B$2)`)*
 
 ---
 
@@ -312,6 +335,7 @@ Contoh pemakaian di baris 2 (sesuaikan huruf kolom dengan susunan sheet):
 Digunakan jika saldo awal piutang atau utang ingin dipecah per partner / faktur belum lunas:
 - **Kolom**: `id`, `Reference`, `date`, `journal`, `line_ids/account`, `line_ids/debit`, `line_ids/credit`, `line_ids/name`, `line_ids/partner`, `line_ids/date_maturity`.
 - **Fungsi**: Membentuk journal entry saldo awal per vendor/customer sehingga umur piutang (*Aged Receivable*) dan umur utang (*Aged Payable*) tercatat akurat per rekanan.
+- Untuk satu saldo per partner, lebih ringkas lewat kolom `nominal_hutang` / `nominal_piutang` di sheet `r.p` (lihat bagian sheet `r.p`). Sheet ini dipakai jika butuh rincian per faktur atau baris jurnal bebas.
 - Jika detail per partner tidak diperlukan, saldo awal piutang dan utang cukup diisi gelondongan pada sheet `account.account` / `a.a`.
 
 ---
@@ -347,5 +371,5 @@ Menyesuaikan nama baris laporan keuangan:
 ## Konfigurasi Flags (`tools/import_engine.py`)
 
 - `VALIDATE_IMPORTED_ASSETS` (default `False`): Set `True` jika ingin asset langsung tervalidasi setelah di-import.
-- `POST_OPENING_MOVES` (default `False`): Set `True` jika ingin opening move partner langsung ter-post.
+- `POST_OPENING_MOVES` (default `False`): Set `True` jika ingin opening move partner (sheet `v.b` / `c.i` dan saldo awal hutang/piutang dari sheet `r.p`) langsung ter-post.
 
