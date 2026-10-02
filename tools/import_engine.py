@@ -168,8 +168,25 @@ def _cleanup_previous_data(env, wb, company):
         ("module", "=", MODULE),
         ("model", "in", ("account.account", "account.journal", "account.asset", "account.bank.statement.line")),
     ])
+    # Aset hasil import lama harus ikut dihapus bersama mapping-nya. Kalau hanya
+    # mapping yang dihapus, _get_or_create tidak menemukan xml_id dan membuat
+    # aset baru sehingga aset menumpuk di setiap import ulang. Aset yang sudah
+    # divalidasi (bukan draft) dibiarkan beserta mapping-nya agar diperbarui
+    # lewat write dan jurnal penyusutannya tidak ikut terhapus.
+    asset_imds = imds.filtered(lambda d: d.model == "account.asset")
+    if asset_imds:
+        assets = env["account.asset"].browse(asset_imds.mapped("res_id")).exists()
+        stale_assets = assets.filtered(lambda a: a.state == "draft")
+        kept_assets = assets.filtered(lambda a: a.state not in ("draft", "model"))
+        if kept_assets:
+            _logger.warning(
+                "Aset non-draft dipertahankan dan diperbarui in-place: %s",
+                ", ".join(kept_assets.mapped("name")),
+            )
+            imds -= asset_imds.filtered(lambda d: d.res_id in kept_assets.ids)
+        stale_assets.unlink()
     if imds:
-        imds.unlink()
+        imds.exists().unlink()
 
     # 1. Bersihkan statement lines saldo awal lama
     st_lines = env["account.bank.statement.line"].search([("company_id", "=", company.id)])
